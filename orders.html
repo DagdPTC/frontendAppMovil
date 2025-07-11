@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Orderly - Pedidos</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body class="bg-gray-50 font-sans">
+
+  <div class="max-w-md mx-auto min-h-screen bg-white shadow-lg overflow-hidden relative">
+
+    <!-- Barra de navegación superior -->
+    <nav class="bg-sky-400 text-white p-4 nav-shadow rounded-b-xl">
+      <div class="flex items-center space-x-3">
+        <i class="fas fa-clipboard-list text-2xl"></i>
+        <h1 class="text-lg font-semibold">Pedidos del día</h1>
+      </div>
+    </nav>
+
+    <main class="p-4 pb-20">
+      <!-- Botón para nuevo pedido -->
+      <div class="flex justify-end mb-4">
+        <button id="new-order-btn" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center">
+          <i class="fas fa-plus mr-2"></i>
+          <span>Nuevo Pedido</span>
+        </button>
+      </div>
+
+      <!-- Lista de pedidos -->
+      <div id="orders-list" class="space-y-4">
+        <!-- Pedido de ejemplo -->
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="flex justify-between items-start mb-2">
+            <div>
+              <h3 class="font-bold text-gray-800">Mesa 4</h3>
+              <p class="text-xs text-gray-500">Juan - 12:45 PM</p>
+            </div>
+            <span class="bg-blue-100 text-blue-600 px-2 py-1 rounded-full text-xs font-medium">En preparación</span>
+          </div>
+          <div class="border-t border-gray-100 pt-2">
+            <div class="flex justify-between text-sm mb-1">
+              <span>1x Ribeye</span>
+              <span class="font-medium">$249</span>
+            </div>
+            <div class="flex justify-between text-sm mb-1">
+              <span>2x Limonada</span>
+              <span class="font-medium">$70</span>
+            </div>
+            <div class="flex justify-between text-sm font-bold mt-2 pt-2 border-t border-gray-100">
+              <span>Total</span>
+              <span>$319</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Formulario de Nuevo Pedido (oculto inicialmente) -->
+      <div id="new-order-form" class="hidden p-4 pb-20">
+        <div class="flex justify-between items-center mb-6">
+          <h1 class="text-xl font-bold text-gray-800">Nuevo Pedido</h1>
+          <button id="back-to-orders" class="text-blue-500 font-medium">Cancelar</button>
+        </div>
+
+        <form id="order-form" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Mesa *</label>
+            <select id="table-select" class="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">Seleccione una mesa</option>
+              <option value="1">Mesa 1</option>
+              <option value="2">Mesa 2</option>
+              <option value="3">Mesa 3</option>
+              <option value="4">Mesa 4</option>
+              <option value="5">Mesa 5</option>
+              <option value="6">Mesa 6</option>
+              <option value="7">Mesa 7</option>
+              <option value="8">Mesa 8</option>
+              <option value="9">Mesa 9</option>
+              <option value="10">Mesa 10</option>
+              <option value="11">Mesa 11</option>
+              <option value="12">Mesa 12</option>
+            </select>
+            <div id="table-error" class="hidden text-sm">Por favor seleccione una mesa</div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Mesero</label>
+            <input type="text" value="Juan" readonly class="w-full p-2 border border-gray-300 rounded-lg bg-gray-100">
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Hora</label>
+            <input type="text" id="order-time" class="w-full p-2 border border-gray-300 rounded-lg bg-gray-100" readonly>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Platillos *</label>
+            <button type="button" id="add-dishes-btn" class="w-full p-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-500 hover:text-blue-500 transition">
+              <i class="fas fa-plus mr-2"></i> Agregar platillos
+            </button>
+            <div id="dishes-error" class="hidden text-sm">Por favor agregue al menos un platillo</div>
+          </div>
+
+          <div class="pt-4">
+            <button type="submit" id="save-order-btn" class="w-full bg-blue-500 text-white py-3 rounded-lg font-medium hover:bg-blue-600 transition">
+              Guardar Pedido
+            </button>
+          </div>
+        </form>
+      </div>
+    </main>
+
+    <!-- Barra de navegación inferior -->
+    <nav class="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around py-3 px-2 rounded-t-2xl">
+      <a href="index.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-home text-lg mb-1"></i>
+        <span>Inicio</span>
+      </a>
+      <a href="tables.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-chair text-lg mb-1"></i>
+        <span>Mesas</span>
+      </a>
+      <a href="orders.html" class="flex flex-col items-center text-xs p-2 active-tab">
+        <i class="fas fa-clipboard-list text-lg mb-1"></i>
+        <span>Pedidos</span>
+      </a>
+      <a href="reservations.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-calendar-alt text-lg mb-1"></i>
+        <span>Reservas</span>
+      </a>
+      <a href="menu.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-utensils text-lg mb-1"></i>
+        <span>Menú</span>
+      </a>
+    </nav>
+
+  </div>
+
+  <script src="js/orders.js"></script>
+</body>
+</html>

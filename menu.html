@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Orderly - Menú</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/menu.css" />
+</head>
+<body class="bg-gray-50 font-sans">
+  <div class="max-w-md mx-auto min-h-screen bg-white shadow-lg overflow-hidden relative">
+    <!-- Barra superior -->
+    <nav class="bg-sky-400 text-white p-4 nav-shadow rounded-b-xl">
+      <div class="flex items-center space-x-3">
+        <i class="fas fa-utensils text-2xl"></i>
+        <h1 class="text-lg font-semibold">Menú</h1>
+        
+      </div>
+    </nav>
+
+    <main class="p-4 pb-20">
+      <!-- Barra de búsqueda -->
+      <div class="mb-4">
+        <input type="text" id="search-menu" placeholder="Buscar platillo..." class="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+      </div>
+
+      <div class="flex justify-end mb-2">
+         <button id="filter-button" class="bg-blue-50 text-blue-600 px-3 py-1 rounded-full text-sm font-medium flex items-center">
+            <i class="fas fa-filter mr-1"></i>
+            <span>Categorías</span>
+          </button>
+        </div>
+
+
+      <!-- Filtro de categorías -->
+            <div id="category-filter" class="hidden mb-4">
+                <div class="flex flex-wrap gap-2">
+                    <button class="category-btn bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm font-medium" data-category="all">Todos</button>
+                    <button class="category-btn bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-medium" data-category="entradas">Entradas</button>
+                    <button class="category-btn bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-medium" data-category="principales">Principales</button>
+                    <button class="category-btn bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-medium" data-category="postres">Postres</button>
+                    <button class="category-btn bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-medium" data-category="bebidas">Bebidas</button>
+                    <button class="category-btn bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-medium" data-category="ensaladas">Ensaladas</button>
+                </div>
+            </div>
+
+      <!-- Lista de platillos -->
+      <div id="menu-list" class="space-y-4">
+        <!-- Ejemplo -->
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="font-bold text-gray-800">Pupusas mixtas</h3>
+              <p class="text-xs text-gray-500">Revueltas - Queso, chicharrón y frijoles</p>
+            </div>
+            <span class="text-sm font-bold text-blue-500">$1.50</span>
+          </div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="font-bold text-gray-800">Sopa de gallina</h3>
+              <p class="text-xs text-gray-500">Acompañada de arroz y tortillas</p>
+            </div>
+            <span class="text-sm font-bold text-blue-500">$4.00</span>
+          </div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="font-bold text-gray-800">Hamburgueza clasica</h3>
+              <p class="text-xs text-gray-500">Hamburgueza doble carne con lechuga, queso derretido acompañado con papas fritas</p>
+            </div>
+            <span class="text-sm font-bold text-blue-500">$6.00</span>
+          </div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="font-bold text-gray-800">Sopa de gallina</h3>
+              <p class="text-xs text-gray-500">Acompañada de arroz y tortillas</p>
+            </div>
+            <span class="text-sm font-bold text-blue-500">$4.00</span>
+          </div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="font-bold text-gray-800">Sopa de gallina</h3>
+              <p class="text-xs text-gray-500">Acompañada de arroz y tortillas</p>
+            </div>
+            <span class="text-sm font-bold text-blue-500">$4.00</span>
+          </div>
+        </div>
+        
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="font-bold text-gray-800">Sopa de gallina</h3>
+              <p class="text-xs text-gray-500">Acompañada de arroz y tortillas</p>
+            </div>
+            <span class="text-sm font-bold text-blue-500">$4.00</span>
+          </div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="font-bold text-gray-800">Sopa de gallina</h3>
+              <p class="text-xs text-gray-500">Acompañada de arroz y tortillas</p>
+            </div>
+            <span class="text-sm font-bold text-blue-500">$4.00</span>
+          </div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="font-bold text-gray-800">Sopa de gallina</h3>
+              <p class="text-xs text-gray-500">Acompañada de arroz y tortillas</p>
+            </div>
+            <span class="text-sm font-bold text-blue-500">$4.00</span>
+          </div>
+        </div>
+
+        <div class="bg-white border border-gray-200 rounded-lg p-4">
+          <div class="flex justify-between items-center">
+            <div>
+              <h3 class="font-bold text-gray-800">Sopa de gallina</h3>
+              <p class="text-xs text-gray-500">Acompañada de arroz y tortillas</p>
+            </div>
+            <span class="text-sm font-bold text-blue-500">$4.00</span>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- Navegación inferior -->
+    <nav class="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around py-3 px-2 rounded-t-2xl">
+      <a href="index.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-home text-lg mb-1"></i>
+        <span>Inicio</span>
+      </a>
+      <a href="tables.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-chair text-lg mb-1"></i>
+        <span>Mesas</span>
+      </a>
+      <a href="orders.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-clipboard-list text-lg mb-1"></i>
+        <span>Pedidos</span>
+      </a>
+      <a href="reservations.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-calendar-alt text-lg mb-1"></i>
+        <span>Reservas</span>
+      </a>
+      <a href="menu.html" class="flex flex-col items-center text-xs p-2 active-tab">
+        <i class="fas fa-utensils text-lg mb-1"></i>
+        <span>Menú</span>
+      </a>
+    </nav>
+  </div>
+
+  <script src="js/menu.js"></script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orderly - Inicio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="bg-gray-50 font-sans">
+    <div class="max-w-md mx-auto min-h-screen bg-white shadow-lg overflow-hidden relative">
+        <!-- Barra de navegación superior -->
+        <nav class="bg-sky-400 text-white p-4 nav-shadow rounded-b-xl">
+            <div class="flex items-center space-x-3">
+                <img src="https://randomuser.me/api/portraits/men/32.jpg" alt="Usuario" class="w-10 h-10 rounded-full border-2 border-white">
+                <div>
+                    <p class="font-medium">Hola, Juan</p>
+                    <p class="text-xs opacity-90">Bienvenido a Orderly</p>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Contenido principal -->
+        <main class="p-4 pb-20">
+            <!-- Encabezado con fecha -->
+            <div class="flex justify-between items-center mb-6">
+                <h1 class="text-xl font-bold text-gray-800">Inicio</h1>
+                <div class="bg-gray-100 px-3 py-1 rounded-full text-sm font-medium">
+                    <span id="current-date">Lun, 15 May</span>
+                </div>
+            </div>
+
+            <!-- Tarjetas deslizantes -->
+            <div class="relative h-48 mb-8 overflow-hidden rounded-xl">
+                <div id="card-container" class="h-full w-full relative"></div>
+                <div class="absolute bottom-2 left-0 right-0 flex justify-center space-x-2">
+                    <div id="indicator-1" class="w-2 h-2 bg-blue-400 rounded-full"></div>
+                    <div id="indicator-2" class="w-2 h-2 bg-gray-300 rounded-full"></div>
+                    <div id="indicator-3" class="w-2 h-2 bg-gray-300 rounded-full"></div>
+                    <div id="indicator-4" class="w-2 h-2 bg-gray-300 rounded-full"></div>
+                    <div id="indicator-5" class="w-2 h-2 bg-gray-300 rounded-full"></div>
+                </div>
+            </div>
+
+            <!-- Estadísticas rápidas -->
+            <div class="grid grid-cols-2 gap-4 mb-8">
+                <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-xs text-blue-600">Pedidos hoy</p>
+                            <p class="text-xl font-bold">24</p>
+                        </div>
+                        <div class="bg-blue-100 p-2 rounded-full">
+                            <i class="fas fa-clipboard-list text-blue-600"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-green-50 p-4 rounded-lg border border-green-100">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-xs text-green-600">Mesas disponibles</p>
+                            <p class="text-xl font-bold">8/12</p>
+                        </div>
+                        <div class="bg-green-100 p-2 rounded-full">
+                            <i class="fas fa-utensils text-green-600"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Acciones rápidas -->
+            <h2 class="text-lg font-semibold mb-4 text-gray-700">Acciones rápidas</h2>
+            <div class="grid grid-cols-2 gap-3 mb-6">
+                <a href="orders.html" class="bg-white border border-gray-200 p-3 rounded-lg flex flex-col items-center justify-center h-24 hover:bg-gray-50 transition">
+                    <i class="fas fa-plus-circle text-blue-500 text-2xl mb-2"></i>
+                    <span class="text-sm font-medium">Nuevo pedido</span>
+                </a>
+                <a href="reservations.html" class="bg-white border border-gray-200 p-3 rounded-lg flex flex-col items-center justify-center h-24 hover:bg-gray-50 transition">
+                    <i class="fas fa-calendar-plus text-green-500 text-2xl mb-2"></i>
+                    <span class="text-sm font-medium">Nueva reserva</span>
+                </a>
+            </div>
+        </main>
+
+        <!-- Barra de navegación inferior -->
+        <nav class="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around py-3 px-2 rounded-t-2xl">
+            <a href="index.html" class="flex flex-col items-center text-xs p-2 active-tab">
+                <i class="fas fa-home text-lg mb-1"></i>
+                <span>Inicio</span>
+            </a>
+            <a href="tables.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+                <i class="fas fa-chair text-lg mb-1"></i>
+                <span>Mesas</span>
+            </a>
+            <a href="orders.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+                <i class="fas fa-clipboard-list text-lg mb-1"></i>
+                <span>Pedidos</span>
+            </a>
+            <a href="reservations.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+                <i class="fas fa-calendar-alt text-lg mb-1"></i>
+                <span>Reservas</span>
+            </a>
+            <a href="menu.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+                <i class="fas fa-utensils text-lg mb-1"></i>
+                <span>Menú</span>
+            </a>
+        </nav>
+    </div>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

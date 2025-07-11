@@ -1,0 +1,22 @@
+@keyframes slideOut {
+    from { transform: translateX(0); opacity: 1; }
+    to { transform: translateX(-100%); opacity: 0; }
+}
+
+.card-slide-in {
+    animation: slideIn 0.5s forwards;
+}
+
+.card-slide-out {
+    animation: slideOut 0.5s forwards;
+}
+
+/* Estilo para pestaña activa de nav */
+.active-tab {
+    transform: scale(1.1);
+    color: #3b82f6;
+}
+
+.nav-shadow {
+    box-shadow: 0 4px 6px -1px rgba(147, 197, 253, 0.3), 0 2px 4px -1px rgba(147, 197, 253, 0.2);
+}
