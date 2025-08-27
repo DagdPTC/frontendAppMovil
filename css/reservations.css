@@ -1,0 +1,32 @@
+/* Estilo para mesas seleccionadas en el modal */
+.mesa-btn-selected {
+    background-color: #3b82f6 !important;
+    color: white !important;
+}
+
+/* Mejora visual cuando el botón está en hover */
+button:hover.mesa-btn-selected {
+    background-color: #2563eb !important;
+}
+
+/* Texto del resumen de mesas seleccionadas */
+#selected-tables-text {
+    font-size: 0.875rem;
+    color: #4b5563;
+}
+
+@keyframes fadeSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.fadeSlideIn {
+    animation: fadeSlideIn 0.4s ease-out forwards;
+}
+

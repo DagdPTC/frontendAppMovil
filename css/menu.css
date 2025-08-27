@@ -1,22 +1,23 @@
-/* Asegúrate de que el cuerpo (body) ocupe toda la pantalla */
-body {
-  min-height: 100vh; /* Esto asegura que el cuerpo ocupa al menos el 100% de la pantalla */
-  display: flex;
-  flex-direction: column;
+.category-active {
+    background-color: #3b82f6;
+    color: white;
 }
 
-/* Estilo para el contenedor principal (main) */
-main {
-  flex: 1; /* Permite que el main ocupe el espacio restante */
-  max-height: calc(100vh - 120px); /* Restar la altura del nav y otros elementos fijos */
-  overflow-y: auto; /* Permite que el contenido de main tenga un scroll vertical */
-  padding-bottom: 20px; /* Agregar un pequeño padding al fondo para que no se vea pegado al borde */
+.dish-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
 }
 
-/* Asegura que los platillos ocultos tengan display none */
-.hidden {
-  display: none;
+.dish-card {
+    transition: all 0.3s ease;
 }
+
+.dish-image {
+    height: 120px;
+    background-size: cover;
+    background-position: center;
+}
+
 
 /* Estilos de los botones activos */
 .filter-btn.bg-sky-400 {
@@ -24,3 +25,18 @@ main {
   color: white;
 }
 
+@keyframes fadeSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.platillo-animado {
+  opacity: 0;
+  animation: fadeSlideIn 0.5s ease forwards;
+}

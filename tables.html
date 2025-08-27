@@ -7,46 +7,50 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/tables.css">
 </head>
 <body class="bg-gray-50 font-sans">
-  <div class="max-w-md mx-auto min-h-screen bg-white shadow-lg overflow-hidden relative">
+
+<div class="w-full md:w-full lg:w-full mx-auto min-h-screen bg-white shadow-lg overflow-hidden relative flex flex-col">
+
     <!-- Encabezado -->
-    <nav class="bg-sky-400 text-white p-4 nav-shadow rounded-b-xl">
+    <nav class="bg-blue-500 text-white p-4 nav-shadow rounded-b-xl">
       <div class="flex items-center space-x-3">
         <i class="fas fa-chair text-2xl"></i>
         <h1 class="text-lg font-semibold">Gestión de Mesas</h1>
       </div>
     </nav>
 
-    <main class="p-4 pb-20">
+    <main class="p-4 pb-24 flex-1 overflow-y-auto">
       <div id="table-grid" class="grid grid-cols-3 gap-4">
         <!-- Mesas generadas por JS -->
       </div>
     </main>
 
-    <!-- Navegación inferior -->
-    <nav class="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around py-3 px-2 rounded-t-2xl">
-      <a href="index.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-        <i class="fas fa-home text-lg mb-1"></i>
-        <span>Inicio</span>
-      </a>
-      <a href="tables.html" class="flex flex-col items-center text-xs p-2 active-tab">
-        <i class="fas fa-chair text-lg mb-1"></i>
-        <span>Mesas</span>
-      </a>
-      <a href="orders.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-        <i class="fas fa-clipboard-list text-lg mb-1"></i>
-        <span>Pedidos</span>
-      </a>
-      <a href="reservations.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-        <i class="fas fa-calendar-alt text-lg mb-1"></i>
-        <span>Reservas</span>
-      </a>
-      <a href="menu.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-        <i class="fas fa-utensils text-lg mb-1"></i>
-        <span>Menú</span>
-      </a>
-    </nav>
+  <!-- BARRA INFERIOR TIPO WEB APP -->
+  <nav class="fixed bottom-0 left-0 right-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 px-2">
+    <a href="index.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+      <i class="fas fa-home text-lg mb-1"></i>
+      <span>Inicio</span>
+    </a>
+    <a href="tables.html" class="flex flex-col items-center text-xs p-2 active-tab">
+      <i class="fas fa-chair text-lg mb-1"></i>
+      <span>Mesas</span>
+    </a>
+    <a href="orders.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+      <i class="fas fa-clipboard-list text-lg mb-1"></i>
+      <span>Pedidos</span>
+    </a>
+    <a href="reservations.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+      <i class="fas fa-calendar-alt text-lg mb-1"></i>
+      <span>Reservas</span>
+    </a>
+    <a href="menu.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+      <i class="fas fa-utensils text-lg mb-1"></i>
+      <span>Menú</span>
+    </a>
+  </nav>
+
   </div>
 
   <script src="js/tables.js"></script>
