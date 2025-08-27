@@ -49,164 +49,14 @@
 
     <!-- Filtro de categorías -->
     <div id="category-filter" class="hidden mb-4">
-      <div class="flex flex-wrap gap-2">
-        <button class="category-btn bg-blue-100 text-blue-600 px-3 py-1 rounded-full text-sm font-medium" data-category="all">Todos</button>
-        <button class="category-btn bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-medium" data-category="entradas">Entradas</button>
-        <button class="category-btn bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-medium" data-category="principales">Principales</button>
-        <button class="category-btn bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-medium" data-category="postres">Postres</button>
-        <button class="category-btn bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-medium" data-category="bebidas">Bebidas</button>
-      </div>
+      <div class="flex flex-wrap gap-2"></div>
     </div>
+
 
       <!-- Contenedor platillos -->
       <div id="dishes-container" class="grid grid-cols-2 gap-4">
 
-        <!-- PLATILLOS (cada tarjeta con botón Agregar) -->
-        <!-- Repite este bloque por cada platillo -->
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="principales">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/pupusas.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Pupusas Mixtas</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Queso, chicharrón y frijoles</p>
-            <p class="text-blue-600 font-bold">$1.50</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="principales">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/sopadegallina.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Sopa de Gallina</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Acompañada de arroz y tortillas</p>
-            <p class="text-blue-600 font-bold">$4.00</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="principales">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/hambuguesa.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Hamburguesa Clásica</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Doble carne, queso y papas fritas</p>
-            <p class="text-blue-600 font-bold">$6.00</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="principales">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/pizza.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Pizza Personal</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Jamón, queso y salsa especial</p>
-            <p class="text-blue-600 font-bold">$5.50</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="entradas">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/nachos.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Nachos Especiales</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Queso, frijoles y guacamole</p>
-            <p class="text-blue-600 font-bold">$3.75</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="bebidas">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/limonada.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Limonada Natural</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Bebida refrescante</p>
-            <p class="text-blue-600 font-bold">$1.25</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="bebidas">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/cafehelado.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Café Helado</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Café con hielo y leche</p>
-            <p class="text-blue-600 font-bold">$2.50</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="postres">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/cheesecake.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Cheesecake</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Postre con frutos rojos</p>
-            <p class="text-blue-600 font-bold">$3.25</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="postres">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/brownie.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Brownie</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Bizcocho de chocolate</p>
-            <p class="text-blue-600 font-bold">$2.75</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="principales">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/pastaalfredo.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Pasta Alfredo</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Salsa cremosa de parmesano</p>
-            <p class="text-blue-600 font-bold">$7.00</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="principales">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/pollofrito.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Pollo Frito</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Con papas fritas</p>
-            <p class="text-blue-600 font-bold">$5.00</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
-
-        <div class="dish-card bg-white border border-gray-200 rounded-lg overflow-hidden" data-category="principales">
-          <div class="h-28 bg-cover bg-center" style="background-image: url('img/sandwich.jpg')"></div>
-          <div class="p-3">
-            <h3 class="font-bold">Sándwich Club</h3>
-            <p class="text-xs text-gray-600 mb-2 truncate">Jamón, queso, lechuga y tomate</p>
-            <p class="text-blue-600 font-bold">$4.50</p>
-            <button class="add-dish-btn hidden bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-medium mt-2 w-full">
-              Agregar
-            </button>
-          </div>
-        </div>
+        
       </div>
 
   </main>
@@ -237,6 +87,6 @@
 
 </div>
 
-<script src="js/menu.js"></script>
+<script type="module" src="js/controllers/menuController.js"></script>
 </body>
 </html>
