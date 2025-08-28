@@ -1,15 +1,24 @@
-// controllers/ordersController.js
-// Controlador para "Pedidos": persiste en la API pero conserva UI, animaciones y validaciones
+// js/controllers/ordersController.js
+// Vista de pedidos conectada a la API real.
+// - GET/DELETE funcionando
+// - Selección de platillos via sessionStorage (desde menu.html)
+// - Form se reabre al volver del Menú
+// - Mesero dinámico (GET a /apiEmpleado)
+// - POST en serie (1 registro por platillo), payload "limpio"
+// - Lista con + / − / 🗑 en el form
 
 import {
   getPedidos,
   createPedido,
   updatePedido,
   deletePedido,
+  getEstadosPedido,
 } from "../services/ordersService.js";
 
-// ---------------- Configuración de estados (píldora clickeable) ----------------
-const PEDIDO_STATUS_ORDER = ["pendiente", "en preparación", "listo", "entregado", "pagado", "cancelado"];
+import { getPlatillos } from "../services/menuService.js"; // para mapear idPlatillo -> nombre
+import { API } from "../services/apiConfig.js";            // para llamar a /apiEmpleado
+
+/* --------- Colores para Píldora de estado (fallback) --------- */
 const PEDIDO_STATUS_COLORS = {
   pendiente: "bg-yellow-100 text-yellow-700",
   "en preparación": "bg-blue-100 text-blue-700",
@@ -17,638 +26,529 @@ const PEDIDO_STATUS_COLORS = {
   entregado: "bg-purple-100 text-purple-700",
   pagado: "bg-gray-200 text-gray-700",
   cancelado: "bg-red-100 text-red-700",
-  "cancelado y pagado": "bg-gray-300 text-gray-700", // compatibilidad
 };
-const ESTADOS_FINALES = new Set(["pagado", "cancelado", "cancelado y pagado"]);
 
-// ---------------- Estado en memoria (solo UI) ----------------
-let platillosSeleccionados = [];
-let pedidoEnEdicion = null; // objeto UI del pedido que se edita
-let pedidosCache = []; // espejo local de lo que viene de la API
+/* Fallback si no hay catálogo en API */
+const FALLBACK_ESTADOS = [
+  { id: 1, nombre: "pendiente" },
+  { id: 2, nombre: "en preparación" },
+  { id: 3, nombre: "listo" },
+  { id: 4, nombre: "entregado" },
+  { id: 5, nombre: "pagado" },
+  { id: 6, nombre: "cancelado" },
+];
 
-// ---------------- Utilidades ----------------
-function obtenerFechaHoraActual() {
-  const now = new Date();
-  const dd = String(now.getDate()).padStart(2, "0");
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const yyyy = now.getFullYear();
-  const hh = String(now.getHours()).padStart(2, "0");
-  const min = String(now.getMinutes()).padStart(2, "0");
-  return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+/* --------- Estado global --------- */
+let MAP_ESTADOS   = new Map();   // id -> {id, nombre}
+let MAP_PLATILLOS = new Map();   // id -> {id, nomPlatillo, precio}
+let MAP_EMPLEADOS = new Map();   // id -> {id, nombre}
+
+/* --------- Utils --------- */
+function formatFecha(isoOrYmd) {
+  if (!isoOrYmd) return "";
+  const [y, m, d] = String(isoOrYmd).split("-");
+  if (y && m && d) return `${d}/${m}/${y}`;
+  try {
+    const dt = new Date(isoOrYmd);
+    const dd = String(dt.getDate()).padStart(2, "0");
+    const mm = String(dt.getMonth() + 1).padStart(2, "0");
+    const yy = dt.getFullYear();
+    return `${dd}/${mm}/${yy}`;
+  } catch {
+    return String(isoOrYmd);
+  }
 }
 
-// Mapea objeto de API -> objeto UI esperado por la vista
-function fromApi(p) {
-  // Tolerante a distintos nombres de campos
+function estadoNombrePorId(id) {
+  const item = MAP_ESTADOS.get(Number(id));
+  return (item?.nombre || "").toString().toLowerCase();
+}
+function MAP_ESTADOS_HAS_NAME(nombre) {
+  const n = (nombre || "").toLowerCase();
+  for (const [id, obj] of MAP_ESTADOS.entries()) {
+    if ((obj?.nombre || "").toLowerCase() === n) return id;
+  }
+  return null;
+}
+
+/* --------- DOM & Storage --------- */
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+
+const K_SEL       = "ord_dishes_sel";      // lo escribe el Menú: [{id, nombre, precio, qty}]
+const K_CLIENTE   = "orderly_cliente_nombre";
+const K_MESA      = "orderly_mesa_id";
+const K_OPEN_FORM = "ord_open_form";
+const K_WAITER    = "orderly_waiter_id";
+
+function getSeleccion() {
+  try { return JSON.parse(sessionStorage.getItem(K_SEL) || "[]"); } catch { return []; }
+}
+function setSeleccion(v) { sessionStorage.setItem(K_SEL, JSON.stringify(v)); }
+
+function saveFormSnapshot() {
+  localStorage.setItem(K_CLIENTE, ($("#customer-name")?.value || "").trim());
+  localStorage.setItem(K_MESA, $("#table-select")?.value || "");
+  sessionStorage.setItem(K_WAITER, $("#waiter-select")?.value || "");
+}
+function restoreFormSnapshot() {
+  const name = localStorage.getItem(K_CLIENTE);
+  const mesa = localStorage.getItem(K_MESA);
+  if (name) $("#customer-name").value = name;
+  if (mesa) $("#table-select").value  = mesa;
+}
+
+/* --------- Empleados (GET directo desde aquí, sin service extra) --------- */
+function pickArray(payload) {
+  if (!payload) return [];
+  if (Array.isArray(payload?.content)) return payload.content;
+  if (Array.isArray(payload)) return payload;
+  return [];
+}
+async function getJSON(url) {
+  const res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-cache" });
+  const txt = await res.text().catch(() => "");
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${txt}`);
+  return txt ? JSON.parse(txt) : null;
+}
+function normalizeEmpleado(e) {
+  if (!e || typeof e !== "object") return null;
+
+  // ID robusto (acepta varias variantes comunes)
   const id =
-    p.id ?? p.pedidoId ?? p.idPedido ?? p.ID ?? p.Id ?? null;
+    Number(e.id) ??
+    Number(e.idEmpleado) ??
+    Number(e.ID) ??
+    Number(e.Id);
 
-  const cliente =
-    p.Cliente ?? p.cliente ?? p.nomCliente ?? p.nombreCliente ?? "";
+  // Nombre robusto (toma el primero que exista; arma nombres + apellidos si están)
+  let nombre =
+    e.nomEmpleado ??
+    e.nombre ??
+    (e.nombres && e.apellidos ? `${e.nombres} ${e.apellidos}` : (e.nombres || e.apellidos)) ??
+    e.usuario ??  // por si solo viene el user
+    "";
 
-  const mesa =
-    p.Mesa ?? p.mesa ?? p.idMesa ?? p.mesaId ?? p.numeroMesa ?? "";
+  // Si no hubo ningún nombre, usa "Empleado {id}" como fallback
+  if (!nombre && Number.isFinite(id)) nombre = `Empleado ${id}`;
 
-  const mesero = p.Mesero ?? p.mesero ?? p.atendidoPor ?? "Juan";
+  // Validación final
+  if (!Number.isFinite(id) || !String(nombre).trim()) return null;
 
-  const hora =
-    p.Hora ?? p.hora ?? p.fechaHora ?? p.fPedido ?? p.fechaPedido ?? obtenerFechaHoraActual();
+  return { id: Number(id), nombre: String(nombre).trim() };
+}
 
-  const estado =
-    p.Estado ?? p.estado ?? "pendiente";
+async function getEmpleados(page=0) {
+  if (!API?.empleado) return [];
+  const sizes = [50, 20, 10, null];
+  for (const s of sizes) {
+    const url = s == null
+      ? `${API.empleado}/getDataEmpleado?page=${page}`
+      : `${API.empleado}/getDataEmpleado?page=${page}&size=${s}`;
+    try {
+      const data = await getJSON(url);
+      const arr = pickArray(data).map(normalizeEmpleado).filter(Boolean);
+      if (arr.length) return arr;
+    } catch {}
+  }
+  return [];
+}
 
-  const confirmado = Boolean(p.Confirmado ?? p.confirmado ?? false);
+/* --------- Mapeo API -> UI (AJUSTADO A TU JSON) --------- */
+function fromApi(p) {
+  const id = p.id;
+  const nombreCliente = p.nombrecliente || p.nombreCliente || p.cliente || "";
+  const mesa = p.idMesa ?? p.mesa ?? "";
+  const fecha = formatFecha(p.fpedido || p.fecha || p.fechaPedido);
+  const idEstado = p.idEstadoPedido ?? p.estadoId ?? p.idEstado ?? 1;
+  const estadoNombre = estadoNombrePorId(idEstado) || "pendiente";
 
-  const platillosSrc =
-    p.Platillos ?? p.platillos ?? p.detalle ?? p.detalles ?? [];
+  // Nombre de platillo por catálogo
+  const platInfo = MAP_PLATILLOS.get(Number(p.idPlatillo)) || null;
+  const nombrePlatillo = platInfo?.nomPlatillo || platInfo?.nombre || `Platillo ${p.idPlatillo}`;
 
-  const platillos = Array.isArray(platillosSrc)
-    ? platillosSrc.map((d) => ({
-        nombre: d.nombre ?? d.platillo ?? d.item ?? "",
-        cantidad: Number(d.cantidad ?? d.qty ?? 1),
-        precio: Number(d.precio ?? d.price ?? 0),
-      }))
-    : [];
+  // Mesero: usa mapa si está cargado
+  const meseroNombre = MAP_EMPLEADOS.get(Number(p.idEmpleado))?.nombre || `Empleado ${p.idEmpleado ?? ""}`.trim();
 
   return {
     id,
-    Cliente: cliente,
+    Cliente: nombreCliente,
     Mesa: String(mesa),
-    Mesero: mesero,
-    Hora: hora,
-    Estado: estado,
-    Confirmado: confirmado,
-    Platillos: platillos,
+    Mesero: meseroNombre,
+    Hora: fecha,
+    Estado: estadoNombre,
+    Confirmado: estadoNombre === "pagado" || estadoNombre === "cancelado",
+
+    Platillos: [
+      {
+        nombre: nombrePlatillo,
+        cantidad: Number(p.cantidad ?? 1),
+        precio: Number(platInfo?.precio ?? 0),
+      },
+    ],
+
+    _subtotal: Number(p.subtotal ?? 0),
+    _propina: Number(p.propina ?? 0),
+    _total: Number(p.totalPedido ?? 0),
+
+    _raw: {
+      cantidad: p.cantidad,
+      totalPedido: p.totalPedido,
+      subtotal: p.subtotal,
+      propina: p.propina,
+      fpedido: p.fpedido,
+      observaciones: p.observaciones,
+      nombrecliente: p.nombrecliente,
+      idMesa: p.idMesa,
+      idEmpleado: p.idEmpleado,
+      idEstadoPedido: idEstado,
+      idPlatillo: p.idPlatillo,
+    },
   };
 }
 
-// Mapea objeto UI -> payload para la API (ajústalo si tu DTO lo requiere)
-function toApi(p) {
-  return {
-    // Si tu API genera el ID en el back, puedes omitirlo en POST
-    id: p.id ?? undefined,
-    cliente: p.Cliente,
-    mesa: isNaN(Number(p.Mesa)) ? p.Mesa : Number(p.Mesa),
-    mesero: p.Mesero,
-    hora: p.Hora, // o fechaHora/fechaPedido (ajusta tu DTO)
-    estado: p.Estado,
-    confirmado: p.Confirmado,
-    platillos: p.Platillos.map((d) => ({
-      nombre: d.nombre,
-      cantidad: Number(d.cantidad),
-      precio: Number(d.precio),
-    })),
-  };
-}
+/* --------- Carga inicial --------- */
+document.addEventListener("DOMContentLoaded", init);
 
-// ---------------- Persistencia temporal de selección (solo UI) ----------------
-function persistDishPreselection() {
-  sessionStorage.setItem("ord_dishes_pre", JSON.stringify(platillosSeleccionados));
-}
-function loadDishSelectionFromSession(renderDishes) {
-  try {
-    const sel = sessionStorage.getItem("ord_dishes_sel");
-    if (sel) {
-      platillosSeleccionados = JSON.parse(sel) || [];
-      platillosSeleccionados.forEach((p) => {
-        if (!p.cantidad) p.cantidad = 1;
-      });
-      sessionStorage.removeItem("ord_dishes_sel");
-      renderDishes();
-      return;
-    }
-    const pre = sessionStorage.getItem("ord_dishes_pre");
-    if (pre) {
-      platillosSeleccionados = JSON.parse(pre) || [];
-      platillosSeleccionados.forEach((p) => {
-        if (!p.cantidad) p.cantidad = 1;
-      });
-      renderDishes();
-    }
-  } catch {
-    /* noop */
-  }
-}
+async function init() {
+  // refs
+  const ordersList      = $("#orders-list");
+  const newOrderBtn     = $("#new-order-btn");
+  const newOrderForm    = $("#new-order-form");
+  const backToOrdersBtn = $("#back-to-orders");
+  const orderTime       = $("#order-time");
+  const saveOrderBtn    = $("#save-order-btn");
+  const addDishesBtn    = $("#add-dishes-btn");
+  const waiterSelect    = $("#waiter-select");   // <-- SELECT dinámico
 
-// ---------------- Mesas (se mantiene local hasta conectar API de mesas) ----------------
-function actualizarEstadoMesaOcupada(numeroMesa) {
-  let estadoMesas = JSON.parse(localStorage.getItem("estadoMesas")) || [];
-  const i = estadoMesas.findIndex((m) => String(m.number) === String(numeroMesa));
-  if (i >= 0) estadoMesas[i].status = "ocupada";
-  else estadoMesas.push({ number: Number(numeroMesa), status: "ocupada" });
-  localStorage.setItem("estadoMesas", JSON.stringify(estadoMesas));
-}
-function actualizarEstadoMesaDisponible(numeroMesa) {
-  let estadoMesas = JSON.parse(localStorage.getItem("estadoMesas")) || [];
-  const i = estadoMesas.findIndex((m) => String(m.number) === String(numeroMesa));
-  if (i >= 0) estadoMesas[i].status = "disponible";
-  localStorage.setItem("estadoMesas", JSON.stringify(estadoMesas));
-}
-function filtrarMesasDisponibles(mesaSelect) {
-  const mesasEstado = JSON.parse(localStorage.getItem("estadoMesas"));
-  if (!mesasEstado) return;
-  const opciones = mesaSelect.querySelectorAll("option");
-  opciones.forEach((option) => {
-    if (option.value === "") return;
-    const mesa = mesasEstado.find((m) => String(m.number) === option.value);
-    if (mesa && ["reservada", "ocupada", "limpieza"].includes(mesa.status)) {
-      option.disabled = true;
-      option.textContent = `Mesa ${mesa.number} (${mesa.status})`;
-    } else {
-      option.disabled = false;
-      option.textContent = `Mesa ${option.value}`;
-    }
-  });
-}
+  await cargarCatalogos();
+  await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
+  await cargarEmpleados(waiterSelect);           // carga el select y el mapa
 
-// ---------------- Carga desde API ----------------
-async function cargarPedidosDeApi(ordersList, agregarTarjetaPedido) {
-  ordersList.innerHTML = "";
-  try {
-    const lista = await getPedidos(); // ← espera array
-    pedidosCache = Array.isArray(lista) ? lista.map(fromApi) : [];
-    // Render más reciente primero
-    pedidosCache
-      .slice()
-      .reverse()
-      .forEach((p) => agregarTarjetaPedido(p));
-  } catch (e) {
-    console.error("Error al obtener pedidos:", e);
-    // Si falla, mantenemos la lista vacía
-  }
-}
-
-// ---------------- Boot ----------------
-document.addEventListener("DOMContentLoaded", () => {
-  // ------- Referencias UI -------
-  const newOrderBtn = document.getElementById("new-order-btn");
-  const newOrderForm = document.getElementById("new-order-form");
-  const ordersList = document.getElementById("orders-list");
-  const backToOrdersBtn = document.getElementById("back-to-orders");
-  const orderTime = document.getElementById("order-time");
-
-  const mesaSelect = document.getElementById("table-select");
-  const mesaError = document.getElementById("table-error");
-
-  const customerInput = document.getElementById("customer-name");
-  const customerError = document.getElementById("customer-error");
-
-  const dishesError = document.getElementById("dishes-error");
-  const dishesSummary = document.getElementById("dishes-summary");
-  const itemCountBadge = document.getElementById("items-count");
-
-  const saveOrderBtn = document.getElementById("save-order-btn");
-  const addDishesBtn = document.getElementById("add-dishes-btn");
-
-  // ------- Helpers de formulario -------
-  function saveFormDataToStorage() {
-    localStorage.setItem("clienteTemporal", customerInput.value);
-    localStorage.setItem("mesaTemporal", mesaSelect.value);
-  }
-  function loadFormDataFromStorage() {
-    const c = localStorage.getItem("clienteTemporal");
-    const m = localStorage.getItem("mesaTemporal");
-    if (c) customerInput.value = c;
-    if (m) mesaSelect.value = m;
-    localStorage.removeItem("clienteTemporal");
-    localStorage.removeItem("mesaTemporal");
-  }
-  function renderDishes() {
-    dishesSummary.innerHTML = "";
-    if (platillosSeleccionados.length === 0) {
-      itemCountBadge.classList.add("hidden");
-      return;
-    }
-    itemCountBadge.textContent = `${platillosSeleccionados.length} items`;
-    itemCountBadge.classList.remove("hidden");
-
-    platillosSeleccionados.forEach((dish, index) => {
-      const precioUnitario = parseFloat(dish.precio) || 0;
-      const itemDiv = document.createElement("div");
-      itemDiv.className =
-        "flex justify-between items-center bg-white border rounded-lg px-2 py-1 mb-2";
-      itemDiv.innerHTML = `
-        <div>
-          <p class="font-semibold text-sm">${dish.nombre}</p>
-          <p class="text-xs text-gray-500">$${precioUnitario.toFixed(2)} x ${dish.cantidad} = $${(
-        precioUnitario * dish.cantidad
-      ).toFixed(2)}</p>
-        </div>
-        <div class="flex items-center space-x-1">
-          <button class="px-2 bg-gray-200 rounded" data-action="decrease" data-index="${index}">-</button>
-          <span class="text-sm font-medium">${dish.cantidad}</span>
-          <button class="px-2 bg-gray-200 rounded" data-action="increase" data-index="${index}">+</button>
-          <button class="text-red-500 ml-2" data-action="remove" data-index="${index}">
-            <i class="fas fa-trash"></i>
-          </button>
-        </div>
-      `;
-      dishesSummary.appendChild(itemDiv);
-    });
-
-    const totalPedido = platillosSeleccionados.reduce((acc, d) => acc + (parseFloat(d.precio) || 0) * d.cantidad, 0);
-    const propina = totalPedido * 0.1;
-    const totalConPropina = totalPedido + propina;
-
-    const totalDiv = document.createElement("div");
-    totalDiv.className = "text-right font-semibold text-sm mt-2";
-    totalDiv.innerHTML = `
-      Subtotal: $${totalPedido.toFixed(2)}<br>
-      Propina (10%): $${propina.toFixed(2)}<br>
-      Total: $${totalConPropina.toFixed(2)}
-    `;
-    dishesSummary.appendChild(totalDiv);
-  }
-  function handleDishActions(e) {
-    const action = e.target.dataset.action;
-    const idx = Number(e.target.dataset.index);
-    if (action === "increase") platillosSeleccionados[idx].cantidad++;
-    else if (action === "decrease") platillosSeleccionados[idx].cantidad = Math.max(1, platillosSeleccionados[idx].cantidad - 1);
-    else if (action === "remove") platillosSeleccionados.splice(idx, 1);
-    renderDishes();
-    persistDishPreselection();
-  }
-  dishesSummary.addEventListener("click", (e) => {
-    if (e.target.dataset.action) handleDishActions(e);
-    else {
-      const btn = e.target.closest("[data-action]");
-      if (btn) handleDishActions({ target: btn });
-    }
-  });
-
-  // ------- Edición desde localStorage (flujo UI existente) -------
-  function loadEditIfAny() {
-    const raw = localStorage.getItem("pedidoEnEdicion");
-    if (!raw) return;
-    const p = JSON.parse(raw);
-    pedidoEnEdicion = p;
-
-    saveOrderBtn.textContent = "Actualizar Pedido";
-    customerInput.value = p.Cliente || "";
-    mesaSelect.value = p.Mesa || "";
-    orderTime.value = p.Hora || obtenerFechaHoraActual();
-
-    platillosSeleccionados = (p.Platillos || []).map((x) => ({
-      nombre: x.nombre,
-      cantidad: x.cantidad || 1,
-      precio: x.precio,
-    }));
-    renderDishes();
-  }
-
-  // ------- Construcción de tarjetas -------
-  function agregarTarjetaPedido(pedido) {
-    const card = document.createElement("div");
-    card.className =
-      "tarjeta-animada border border-gray-200 rounded-xl p-4 bg-white shadow-sm cursor-pointer hover:bg-gray-40 transition";
-
-    const listaPlatillos = pedido.Platillos.map((x) => `<li>${x.nombre} (x${x.cantidad})</li>`).join("");
-
-    const total = pedido.Platillos.reduce((acc, x) => acc + (parseFloat(x.precio) || 0) * x.cantidad, 0);
-    const propina = total * 0.1;
-    const totalConPropina = total + propina;
-
-    let estadoActual = pedido.Estado || "pendiente";
-    let confirmado = !!pedido.Confirmado;
-
-    card.innerHTML = `
-      <div class="flex justify-between items-start">
-        <h2 class="font-bold text-lg">Pedido de ${pedido.Cliente}</h2>
-        <button
-          class="estado-pedido inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${PEDIDO_STATUS_COLORS[estadoActual] || "bg-gray-100 text-gray-700"}"
-          data-id="${pedido.id}"
-          data-estado="${estadoActual}"
-          title="Haz clic para cambiar el estado">
-          ${estadoActual}
-        </button>
-      </div>
-
-      <p><strong>Mesa:</strong> ${pedido.Mesa}</p>
-      <p><strong>Mesero:</strong> ${pedido.Mesero}</p>
-      <p><strong>Fecha:</strong> ${pedido.Hora}</p>
-
-      <div class="acciones-extra mt-2 flex justify-end">
-        <button class="btn-confirmar-estado bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1 rounded text-sm font-medium hidden"
-          data-id="${pedido.id}">
-          Confirmar
-        </button>
-      </div>
-
-      <p class="mt-2"><strong>Platillos:</strong></p>
-      <ul class="list-disc pl-5 text-sm mb-2">
-        ${listaPlatillos}
-      </ul>
-
-      <p class="font-semibold text-right text-sm mb-3">
-        Total: $${totalConPropina.toFixed(2)}
-      </p>
-
-      <div class="flex justify-start">
-        <button class="btn-eliminar bg-red-500 text-white px-3 py-1 rounded text-sm font-medium"
-          data-action="delete" data-id="${pedido.id}">
-          Eliminar
-        </button>
-      </div>
-    `;
-
-    const deleteBtn = card.querySelector(".btn-eliminar");
-    const estadoBtn = card.querySelector(".estado-pedido");
-    const confirmBtn = card.querySelector(".btn-confirmar-estado");
-
-    function actualizarUIConfirmacion(estado, isConfirmado) {
-      if (ESTADOS_FINALES.has(estado) && !isConfirmado) {
-        confirmBtn.textContent =
-          estado === "pagado" || estado === "cancelado y pagado" ? "Confirmar pago" : "Confirmar cancelación";
-        confirmBtn.classList.remove("hidden");
-      } else {
-        confirmBtn.classList.add("hidden");
-      }
-    }
-    function aplicarBloqueo(estado, isConfirmado) {
-      const bloquear = isConfirmado && ESTADOS_FINALES.has(estado);
-      deleteBtn.disabled = bloquear;
-      deleteBtn.title = bloquear ? "No se puede eliminar un pedido confirmado" : "";
-      deleteBtn.className = bloquear
-        ? "btn-eliminar bg-gray-300 text-gray-500 px-3 py-1 rounded text-sm font-medium cursor-not-allowed"
-        : "btn-eliminar bg-red-500 text-white px-3 py-1 rounded text-sm font-medium";
-
-      card.dataset.bloqueado = bloquear ? "1" : "0";
-      if (bloquear) {
-        estadoBtn.style.pointerEvents = "none";
-        estadoBtn.classList.add("cursor-not-allowed", "opacity-80");
-        estadoBtn.title = "Pedido confirmado, no se puede cambiar el estado";
-      } else {
-        estadoBtn.style.pointerEvents = "auto";
-        estadoBtn.classList.remove("cursor-not-allowed", "opacity-80");
-        estadoBtn.title = "Haz clic para cambiar el estado";
-      }
-      actualizarUIConfirmacion(estado, isConfirmado);
-    }
-    aplicarBloqueo(estadoActual, confirmado);
-
-    // Eliminar
-    deleteBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (card.dataset.bloqueado === "1") return;
-      const id = Number(e.currentTarget.dataset.id);
-      try {
-        await deletePedido(id);
-        pedidosCache = pedidosCache.filter((x) => x.id !== id);
-        card.remove();
-        if (pedido.Mesa) actualizarEstadoMesaDisponible(pedido.Mesa);
-      } catch (err) {
-        console.error("Error eliminando pedido:", err);
-        alert("No se pudo eliminar el pedido.");
-      }
-    });
-
-    // Cambiar estado (ciclo)
-    estadoBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (confirmado) return;
-      const id = Number(e.currentTarget.dataset.id);
-
-      const idx = PEDIDO_STATUS_ORDER.indexOf(estadoActual);
-      const siguiente = PEDIDO_STATUS_ORDER[(idx + 1) % PEDIDO_STATUS_ORDER.length];
-
-      // Optimista en UI
-      estadoActual = siguiente;
-      e.currentTarget.dataset.estado = siguiente;
-      e.currentTarget.textContent = siguiente;
-      e.currentTarget.className = `estado-pedido inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
-        PEDIDO_STATUS_COLORS[siguiente] || "bg-gray-100 text-gray-700"
-      }`;
-      aplicarBloqueo(estadoActual, confirmado);
-
-      // Persistir en API
-      try {
-        // Buscar en caché y enviar objeto completo (PUT)
-        const original = pedidosCache.find((x) => x.id === id);
-        if (!original) throw new Error("Pedido no encontrado en caché");
-        const actualizado = { ...original, Estado: siguiente };
-        await updatePedido(id, toApi(actualizado));
-        // Actualiza cache
-        const i = pedidosCache.findIndex((x) => x.id === id);
-        if (i >= 0) pedidosCache[i] = actualizado;
-      } catch (err) {
-        console.error("Error actualizando estado:", err);
-        alert("No se pudo actualizar el estado. Reintentando…");
-        // Revertir UI
-        const prevIdx = PEDIDO_STATUS_ORDER.indexOf(estadoActual) - 1;
-        const previo =
-          prevIdx < 0 ? PEDIDO_STATUS_ORDER[PEDIDO_STATUS_ORDER.length - 1] : PEDIDO_STATUS_ORDER[prevIdx];
-        estadoActual = previo;
-        e.currentTarget.dataset.estado = previo;
-        e.currentTarget.textContent = previo;
-        e.currentTarget.className = `estado-pedido inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
-          PEDIDO_STATUS_COLORS[previo] || "bg-gray-100 text-gray-700"
-        }`;
-        aplicarBloqueo(estadoActual, confirmado);
-      }
-    });
-
-    // Confirmar estado final (pago/cancel)
-    confirmBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (!ESTADOS_FINALES.has(estadoActual)) return;
-      const id = Number(confirmBtn.dataset.id);
-      try {
-        const original = pedidosCache.find((x) => x.id === id);
-        if (!original) throw new Error("Pedido no encontrado en caché");
-        const actualizado = { ...original, Confirmado: true };
-        await updatePedido(id, toApi(actualizado));
-        confirmado = true;
-        // UI
-        aplicarBloqueo(estadoActual, confirmado);
-        // Liberar mesa si corresponde
-        if (pedido.Mesa) actualizarEstadoMesaDisponible(pedido.Mesa);
-        // Cache
-        const i = pedidosCache.findIndex((x) => x.id === id);
-        if (i >= 0) pedidosCache[i] = actualizado;
-      } catch (err) {
-        console.error("Error confirmando:", err);
-        alert("No se pudo confirmar el estado.");
-      }
-    });
-
-    // Click en tarjeta = editar (si no está bloqueado)
-    card.addEventListener("click", () => {
-      if (card.dataset.bloqueado === "1") return;
-      customerInput.value = pedido.Cliente;
-      mesaSelect.value = pedido.Mesa;
-      orderTime.value = pedido.Hora;
-
-      platillosSeleccionados = pedido.Platillos.map((x) => ({
-        nombre: x.nombre,
-        cantidad: x.cantidad,
-        precio: x.precio,
-      }));
-      renderDishes();
-
-      pedidoEnEdicion = pedido;
-      localStorage.setItem("pedidoEnEdicion", JSON.stringify(pedido));
-      saveOrderBtn.textContent = "Actualizar Pedido";
-
-      newOrderForm.classList.remove("hidden");
-      ordersList.classList.add("hidden");
-      newOrderBtn.classList.add("hidden");
-    });
-
-    ordersList.prepend(card);
-  }
-
-  // ------- Mostrar formulario -------
-  function openOrderForm() {
+  // Abrir form (manual)
+  newOrderBtn?.addEventListener("click", () => {
     newOrderForm.classList.remove("hidden");
     ordersList.classList.add("hidden");
     newOrderBtn.classList.add("hidden");
+    orderTime.value = new Date().toLocaleDateString("es-ES");
+    restoreFormSnapshot();
+    restoreWaiter(waiterSelect);
+    renderSeleccionUI();
+  });
 
-    orderTime.value = obtenerFechaHoraActual();
-    filtrarMesasDisponibles(mesaSelect);
-
-    // Primero edición (si hay), luego carga de selección
-    loadEditIfAny();
-    loadFormDataFromStorage();
-    if (!pedidoEnEdicion) loadDishSelectionFromSession(renderDishes);
-  }
-
-  // ------- Limpiar formulario -------
-  function clearForm() {
-    mesaSelect.value = "";
-    customerInput.value = "";
-    orderTime.value = "";
-    platillosSeleccionados = [];
-    pedidoEnEdicion = null;
-    renderDishes();
-
-    localStorage.removeItem("clienteTemporal");
-    localStorage.removeItem("mesaTemporal");
-    localStorage.removeItem("pedidoEnEdicion");
-
-    sessionStorage.removeItem("ord_dishes_pre");
-    sessionStorage.removeItem("ord_dishes_sel");
-    sessionStorage.removeItem("ord_return");
-
-    saveOrderBtn.textContent = "Guardar Pedido";
-    dishesError.classList.add("hidden");
-    mesaError.classList.add("hidden");
-    customerError.classList.add("hidden");
-  }
-
-  // ------- Inicializaciones de navegación -------
-  // Abrir automáticamente si viene de ?nuevo=true
-  if (window.location.search.includes("nuevo=true")) {
-    localStorage.setItem("abrirFormularioPedido", "true");
-  }
-  if (localStorage.getItem("abrirFormularioPedido") === "true") {
-    localStorage.removeItem("abrirFormularioPedido");
-    openOrderForm();
-  }
-  // Si se regresa del Menú con selección/preselección
-  if (!newOrderForm || newOrderForm.classList.contains("hidden")) {
-    if (sessionStorage.getItem("ord_dishes_sel") || sessionStorage.getItem("ord_dishes_pre")) {
-      openOrderForm();
-    }
-  }
-
-  // ------- Cargar pedidos desde API -------
-  cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
-
-  // ------- Eventos UI -------
-  newOrderBtn.addEventListener("click", openOrderForm);
-
-  backToOrdersBtn.addEventListener("click", () => {
+  // Cancelar = limpiar todo
+  backToOrdersBtn?.addEventListener("click", () => {
     newOrderForm.classList.add("hidden");
     ordersList.classList.remove("hidden");
     newOrderBtn.classList.remove("hidden");
-    clearForm();
+
+    ($("#customer-name") || {}).value = "";
+    ($("#table-select")  || {}).value = "";
+    ($("#order-notes")   || {}).value = "";
+    if (waiterSelect) waiterSelect.value = "";
+
+    sessionStorage.removeItem(K_SEL);
+    sessionStorage.removeItem(K_OPEN_FORM);
+    sessionStorage.removeItem(K_WAITER);
+    localStorage.removeItem(K_CLIENTE);
+    localStorage.removeItem(K_MESA);
+    renderSeleccionUI();
   });
 
-  addDishesBtn.addEventListener("click", () => {
-    // Persistir datos para regresar
-    localStorage.setItem("clienteTemporal", customerInput.value);
-    localStorage.setItem("mesaTemporal", mesaSelect.value);
-    sessionStorage.setItem("ord_dishes_pre", JSON.stringify(platillosSeleccionados));
-    sessionStorage.setItem("ord_return", location.pathname || "orders.html");
-    if (pedidoEnEdicion) {
-      localStorage.setItem("pedidoEnEdicion", JSON.stringify(pedidoEnEdicion));
-    }
-    window.location.href = "menu.html?modo=seleccion&from=orders";
+  // Ir al Menú y volver al FORM
+  addDishesBtn?.addEventListener("click", () => {
+    saveFormSnapshot();
+    sessionStorage.setItem(K_OPEN_FORM, "1"); // al volver, abrir form
+    const back = (location.pathname.split("/").pop() || "orders.html") + "#new";
+    window.location.href = `menu.html?select=1&back=${encodeURIComponent(back)}`;
   });
 
-  // Guardar / Actualizar
-  saveOrderBtn.addEventListener("click", async (e) => {
+  // Guardar pedido
+  saveOrderBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
-    let valid = true;
+    await guardarPedidoDesdeSeleccion();
+  });
 
-    if (mesaSelect.value === "") {
-      mesaError.classList.remove("hidden");
-      valid = false;
-    } else {
-      mesaError.classList.add("hidden");
+  // Si venimos del menú con selección, abre el formulario
+  if (sessionStorage.getItem(K_OPEN_FORM) === "1" || location.hash === "#new") {
+    newOrderForm.classList.remove("hidden");
+    ordersList.classList.add("hidden");
+    newOrderBtn.classList.add("hidden");
+    orderTime.value = new Date().toLocaleDateString("es-ES");
+    restoreFormSnapshot();
+    restoreWaiter(waiterSelect);
+    renderSeleccionUI();
+  } else {
+    renderSeleccionUI();
+  }
+}
+
+/* --------- Catálogos --------- */
+async function cargarCatalogos() {
+  // Estados
+  const rawEstados = await getEstadosPedido().catch(() => []);
+  if (rawEstados.length) {
+    MAP_ESTADOS = new Map(
+      rawEstados.map((e) => {
+        const id = Number(e.id ?? e.idEstadoPedido ?? e.ID ?? e.Id);
+        const nombre = (e.nomEstadoPedido ?? e.nombre ?? e.estado ?? "").toString().toLowerCase();
+        return [id, { id, nombre }];
+      })
+    );
+  } else {
+    MAP_ESTADOS = new Map(FALLBACK_ESTADOS.map((e) => [e.id, e]));
+  }
+
+  // Platillos
+  const plats = await getPlatillos(0).catch(() => []);
+  MAP_PLATILLOS = new Map(
+    plats.map((p) => [Number(p.id), { id: Number(p.id), nomPlatillo: p.nombre, precio: Number(p.precio || 0) }])
+  );
+}
+
+/* --------- Empleados --------- */
+async function cargarEmpleados(waiterSelect) {
+  if (!waiterSelect) return;
+  waiterSelect.innerHTML = `<option value="">Seleccione un mesero</option>`;
+
+  try {
+    const lista = await getEmpleados(0);
+    if (lista.length) {
+      MAP_EMPLEADOS = new Map(lista.map((e) => [e.id, e]));
+      lista.forEach((e) => {
+        const opt = document.createElement("option");
+        opt.value = String(e.id);
+        opt.textContent = e.nombre;
+        waiterSelect.appendChild(opt);
+      });
     }
+  } catch (e) {
+    console.warn("No se pudieron cargar empleados:", e);
+  }
 
-    if (customerInput.value.trim() === "") {
-      customerError.classList.remove("hidden");
-      valid = false;
-    } else {
-      customerError.classList.add("hidden");
-    }
+  // Restaura selección previa si existe
+  const saved = sessionStorage.getItem(K_WAITER);
+  if (saved && waiterSelect.querySelector(`option[value="${saved}"]`)) {
+    waiterSelect.value = saved;
+  }
 
-    if (platillosSeleccionados.length === 0) {
-      dishesError.classList.remove("hidden");
-      valid = false;
-    } else {
-      dishesError.classList.add("hidden");
-    }
+  waiterSelect.addEventListener("change", () => {
+    sessionStorage.setItem(K_WAITER, waiterSelect.value || "");
+  });
+}
 
-    if (!valid) return;
+/* --------- GET y tarjetas --------- */
+async function cargarPedidosDeApi(ordersList, onAddCard) {
+  ordersList.innerHTML = "";
+  const lista = await getPedidos(0, 50);
+  if (!lista.length) {
+    ordersList.innerHTML = `<div class="text-sm text-gray-500 text-center py-4">No hay pedidos.</div>`;
+    return;
+  }
+  lista
+    .slice()
+    .sort((a, b) => Number(b.id) - Number(a.id))
+    .map(fromApi)
+    .forEach((p) => onAddCard(p, ordersList));
+}
 
-    // Construir objeto UI
-    const pedidoUI = {
-      id: pedidoEnEdicion?.id ?? undefined, // en POST lo omitimos
-      Cliente: customerInput.value.trim(),
-      Mesa: mesaSelect.value,
-      Mesero: "Juan",
-      Hora: orderTime.value || obtenerFechaHoraActual(),
-      Estado: pedidoEnEdicion?.Estado ?? "pendiente",
-      Confirmado: pedidoEnEdicion?.Confirmado ?? false,
-      Platillos: platillosSeleccionados.map((p) => ({
-        nombre: p.nombre,
-        cantidad: p.cantidad,
-        precio: p.precio,
-      })),
-    };
+function agregarTarjetaPedido(pedido, container) {
+  const card = document.createElement("div");
+  card.className =
+    "tarjeta-animada border border-gray-200 rounded-xl p-4 bg-white shadow-sm transition";
 
-    // Marcar mesa ocupada al guardar
-    actualizarEstadoMesaOcupada(mesaSelect.value);
+  const listaPlatillos = pedido.Platillos
+    .map((x) => `<li>${x.nombre} (x${x.cantidad})</li>`)
+    .join("");
 
+  const total    = pedido._total;
+  const subtotal = pedido._subtotal;
+  const propina  = pedido._propina;
+  const colorClass = PEDIDO_STATUS_COLORS[pedido.Estado] || "bg-gray-100 text-gray-700";
+
+  card.innerHTML = `
+    <div class="flex justify-between items-start">
+      <h2 class="font-bold text-lg">Pedido de ${pedido.Cliente}</h2>
+      <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${colorClass}">
+        ${pedido.Estado}
+      </span>
+    </div>
+
+    <p><strong>Mesa:</strong> ${pedido.Mesa}</p>
+    <p><strong>Mesero:</strong> ${pedido.Mesero}</p>
+    <p><strong>Fecha:</strong> ${pedido.Hora}</p>
+
+    <p class="mt-2"><strong>Platillos:</strong></p>
+    <ul class="list-disc pl-5 text-sm mb-2">
+      ${listaPlatillos}
+    </ul>
+
+    <div class="text-right text-sm mb-3">
+      <div>Subtotal: <strong>$${subtotal.toFixed(2)}</strong></div>
+      <div>Propina: <strong>$${propina.toFixed(2)}</strong></div>
+      <div>Total: <strong>$${total.toFixed(2)}</strong></div>
+    </div>
+
+    <div class="flex justify-start">
+      <button class="btn-eliminar bg-red-500 text-white px-3 py-1 rounded text-sm font-medium" data-id="${pedido.id}">
+        Eliminar
+      </button>
+    </div>
+  `;
+
+  card.querySelector(".btn-eliminar").addEventListener("click", async (e) => {
+    const id = Number(e.currentTarget.dataset.id);
     try {
-      if (pedidoEnEdicion?.id != null) {
-        // UPDATE (PUT)
-        await updatePedido(Number(pedidoEnEdicion.id), toApi(pedidoUI));
-      } else {
-        // CREATE (POST)
-        await createPedido(toApi(pedidoUI));
-      }
-
-      // Refrescar la lista completa desde API para asegurar ID y consistencia
-      await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
-
-      // Limpieza de navegación y selección
-      localStorage.removeItem("pedidoEnEdicion");
-      localStorage.setItem("refrescarInicio", "true");
-      sessionStorage.removeItem("ord_dishes_pre");
-      sessionStorage.removeItem("ord_dishes_sel");
-      sessionStorage.removeItem("ord_return");
-
-      clearForm();
-      newOrderForm.classList.add("hidden");
-      ordersList.classList.remove("hidden");
-      newOrderBtn.classList.remove("hidden");
+      await deletePedido(id);
+      card.remove();
     } catch (err) {
-      console.error("Error al guardar/actualizar pedido:", err);
-      alert("No se pudo guardar el pedido en la API.");
+      console.error("Error eliminando pedido:", err);
+      alert("No se pudo eliminar el pedido.");
     }
   });
+
+  container.prepend(card);
+}
+
+/* --------- SELECCIÓN proveniente del Menú --------- */
+function renderSeleccionUI() {
+  const sel = getSeleccion();
+
+  const badge = $("#items-count");
+  const sumBox = $("#dishes-summary");
+  const secSel = $("#selected-dishes-section");
+  const listSel= $("#selected-dishes-list");
+
+  // Badge
+  const items = sel.reduce((acc, x) => acc + (x.qty || 1), 0);
+  if (badge) {
+    if (items > 0) {
+      badge.textContent = `${items} item${items !== 1 ? "s" : ""}`;
+      badge.classList.remove("hidden");
+    } else {
+      badge.classList.add("hidden");
+    }
+  }
+
+  // Resumen + totales
+  if (sumBox) {
+    if (!sel.length) {
+      sumBox.innerHTML = `<div class="text-gray-500 text-sm">No hay platillos seleccionados.</div>`;
+    } else {
+      sumBox.innerHTML = sel.map(it =>
+        `<div class="flex justify-between text-sm">
+          <span>${it.nombre}</span>
+          <span>$${Number(it.precio).toFixed(2)} × ${it.qty || 1}</span>
+        </div>`
+      ).join("");
+      const subtotal = sel.reduce((a, x) => a + Number(x.precio) * (x.qty || 1), 0);
+      const propina  = Math.round(subtotal * 0.10 * 100) / 100;
+      const total    = Math.round((subtotal + propina) * 100) / 100;
+      sumBox.innerHTML += `
+        <hr class="my-2">
+        <div class="text-right text-sm">
+          <div>Subtotal: <strong>$${subtotal.toFixed(2)}</strong></div>
+          <div>Propina (10%): <strong>$${propina.toFixed(2)}</strong></div>
+          <div>Total: <strong>$${total.toFixed(2)}</strong></div>
+        </div>`;
+    }
+  }
+
+  // Lista detallada con +/- y 🗑
+  if (secSel && listSel) {
+    if (!sel.length) {
+      secSel.classList.add("hidden");
+      listSel.innerHTML = "";
+    } else {
+      secSel.classList.remove("hidden");
+      listSel.innerHTML = sel.map(it => `
+        <div class="flex items-center justify-between p-2 bg-white border rounded">
+          <div>
+            <div class="text-sm font-medium">${it.nombre}</div>
+            <div class="text-xs text-gray-500">$${Number(it.precio).toFixed(2)}</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="btn-minus px-2 py-1 bg-gray-200 rounded" data-id="${it.id}">-</button>
+            <span class="w-6 text-center">${it.qty || 1}</span>
+            <button class="btn-plus px-2 py-1 bg-gray-200 rounded" data-id="${it.id}">+</button>
+            <button class="btn-remove px-2 py-1 bg-red-500 text-white rounded" title="Quitar" data-id="${it.id}">
+              <i class="fa fa-trash"></i>
+            </button>
+          </div>
+        </div>
+      `).join("");
+
+      // +
+      $$(".btn-plus", listSel).forEach(b => b.addEventListener("click", () => {
+        const id = b.getAttribute("data-id");
+        const arr = getSeleccion();
+        const it = arr.find(x => String(x.id) === String(id));
+        if (it) it.qty = (it.qty || 1) + 1;
+        setSeleccion(arr);
+        renderSeleccionUI();
+      }));
+
+      // -
+      $$(".btn-minus", listSel).forEach(b => b.addEventListener("click", () => {
+        const id = b.getAttribute("data-id");
+        const arr = getSeleccion();
+        const it = arr.find(x => String(x.id) === String(id));
+        if (it) it.qty = Math.max(1, (it.qty || 1) - 1);
+        setSeleccion(arr);
+        renderSeleccionUI();
+      }));
+
+      // 🗑
+      $$(".btn-remove", listSel).forEach(b => b.addEventListener("click", () => {
+        const id = b.getAttribute("data-id");
+        const arr = getSeleccion().filter(x => String(x.id) !== String(id));
+        setSeleccion(arr);
+        renderSeleccionUI();
+      }));
+    }
+  }
+}
+
+/* --------- Guardar Pedido (POST múltiple, 1 por platillo) --------- */
+function nowParts() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const HH = pad(d.getHours());
+  const MM = pad(d.getMinutes());
+  return { fecha: `${yyyy}-${mm}-${dd}`, hora: `${HH}:${MM}` };
+}
+
+// Construir payloads exactos
+const payloads = seleccion.map(it => {
+  const qty = Math.max(1, parseInt(it.qty || "1", 10));
+  const precio = Number(it.precio) || 0;
+  const subtotal = Number((precio * qty).toFixed(2));
+  const propina  = Number((subtotal * 0.10).toFixed(2));
+  const total    = Number((subtotal + propina).toFixed(2));
+  
+  return {
+    cantidad: qty,
+    totalPedido: total,
+    subtotal: subtotal,
+    propina: propina,
+    fpedido: fecha,
+    observaciones: (observaciones && observaciones.trim() !== "") ? observaciones : "Sin observaciones",
+    nombrecliente: nombrecliente,
+    idMesa: idMesa,
+    idEmpleado: idEmpleado,
+    idEstadoPedido: idEstadoPedido,
+    idPlatillo: parseInt(it.id, 10)
+  };
 });
+
+/* --------- Helpers mesero --------- */
+function restoreWaiter(waiterSelect) {
+  if (!waiterSelect) return;
+  const saved = sessionStorage.getItem(K_WAITER);
+  if (saved && waiterSelect.querySelector(`option[value="${saved}"]`)) {
+    waiterSelect.value = saved;
+  }
+}

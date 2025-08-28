@@ -1,163 +1,191 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Orderly - Pedidos</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="css/styles.css" />
   <link rel="stylesheet" href="css/orders.css">
 </head>
+
 <body class="bg-gray-50 font-sans">
 
-<div class="w-full md:w-full lg:w-full mx-auto min-h-screen bg-white shadow-lg flex flex-col overflow-hidden relative">
+  <div
+    class="w-full md:w-full lg:w-full mx-auto min-h-screen bg-white shadow-lg flex flex-col overflow-hidden relative">
 
-  <!-- Barra superior -->
-  <nav class="bg-blue-500 text-white p-4 nav-shadow rounded-b-xl">
-    <div class="flex items-center space-x-3">
-      <i class="fas fa-clipboard-list text-2xl"></i>
-      <h1 class="text-lg font-semibold">Pedidos del día</h1>
-    </div>
-  </nav>
+    <!-- Barra superior -->
+    <nav class="bg-blue-500 text-white p-4 nav-shadow rounded-b-xl">
+      <div class="flex items-center space-x-3">
+        <i class="fas fa-clipboard-list text-2xl"></i>
+        <h1 class="text-lg font-semibold">Pedidos del día</h1>
+      </div>
+    </nav>
 
-  <!-- Contenido con scroll interno -->
-  <main class="flex-1 overflow-y-auto p-4 pb-24">
+    <!-- Contenido con scroll interno -->
+    <main class="flex-1 overflow-y-auto p-4 pb-24">
 
-    <!-- Botón nuevo pedido -->
-    <div class="flex justify-end mb-4" id="button-section">
-      <button id="new-order-btn" class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center">
-        <i class="fas fa-plus mr-2"></i>
-        <span>Nuevo Pedido</span>
-      </button>
-    </div>
-
-    <!-- Lista de pedidos -->
-    <div id="orders-list" class="space-y-4">
-      <!-- Pedidos generados -->
-    </div>
-
-    <!-- Formulario de Nuevo Pedido -->
-    <div id="new-order-form" class="hidden bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-4">
-
-      <div class="flex justify-between items-center mb-2">
-        <h1 class="text-xl font-bold text-gray-800">Nuevo Pedido</h1>
-        <button id="back-to-orders" class="text-blue-500 font-medium">Cancelar</button>
+      <!-- Botón nuevo pedido -->
+      <div class="flex justify-end mb-4" id="button-section">
+        <button id="new-order-btn"
+          class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center">
+          <i class="fas fa-plus mr-2"></i>
+          <span>Nuevo Pedido</span>
+        </button>
       </div>
 
-      <form id="order-form" class="space-y-5">
+      <!-- Lista de pedidos -->
+      <div id="orders-list" class="space-y-4">
+        <!-- Pedidos generados -->
+      </div>
 
-        <!-- Cliente -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Nombre del Cliente *</label>
-          <input type="text" id="customer-name" placeholder="Ingrese el nombre del cliente" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-          <div id="customer-error" class="hidden text-sm text-red-500">Por favor ingrese el nombre del cliente.</div>
+      <!-- Formulario de Nuevo Pedido -->
+      <div id="new-order-form" class="hidden bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-4">
+
+        <div class="flex justify-between items-center mb-2">
+          <h1 class="text-xl font-bold text-gray-800">Nuevo Pedido</h1>
+          <button id="back-to-orders" class="text-blue-500 font-medium">Cancelar</button>
         </div>
 
-        <!-- Mesa -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Mesa *</label>
-          <select id="table-select" class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
-            <option value="">Seleccione una mesa</option>
-            <option value="1">Mesa 1</option>
-            <option value="2">Mesa 2</option>
-            <option value="3">Mesa 3</option>
-            <option value="4">Mesa 4</option>
-            <option value="5">Mesa 5</option>
-            <option value="6">Mesa 6</option>
-            <option value="7">Mesa 7</option>
-            <option value="8">Mesa 8</option>
-            <option value="9">Mesa 9</option>
-            <option value="10">Mesa 10</option>
-            <option value="11">Mesa 11</option>
-            <option value="12">Mesa 12</option>
-          </select>
-          <div id="table-error" class="hidden text-sm text-red-500">Por favor seleccione una mesa.</div>
-        </div>
+        <form id="order-form" class="space-y-5">
 
-        <!-- Mesero -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Mesero</label>
-          <input type="text" value="Juan" readonly class="w-full p-2 border border-gray-300 rounded-lg bg-gray-100">
-        </div>
+          <!-- Cliente -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Nombre del Cliente *</label>
+            <input type="text" id="customer-name" placeholder="Ingrese el nombre del cliente"
+              class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+            <div id="customer-error" class="hidden text-sm text-red-500">Por favor ingrese el nombre del cliente.</div>
+          </div>
 
-        <!-- Hora -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Hora</label>
-          <input type="text" id="order-time" class="w-full p-2 border border-gray-300 rounded-lg bg-gray-100" readonly>
-        </div>
+          <!-- Mesa -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Mesa *</label>
+            <select id="table-select"
+              class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+              <option value="">Seleccione una mesa</option>
+              <option value="1">Mesa 1</option>
+              <option value="2">Mesa 2</option>
+              <option value="3">Mesa 3</option>
+              <option value="4">Mesa 4</option>
+              <option value="5">Mesa 5</option>
+              <option value="6">Mesa 6</option>
+              <option value="7">Mesa 7</option>
+              <option value="8">Mesa 8</option>
+              <option value="9">Mesa 9</option>
+              <option value="10">Mesa 10</option>
+              <option value="11">Mesa 11</option>
+              <option value="12">Mesa 12</option>
+            </select>
+            <div id="table-error" class="hidden text-sm text-red-500">Por favor seleccione una mesa.</div>
+          </div>
 
-        <!-- Platillos -->
-<!-- Platillos -->
-<div>
-  <label class="block text-sm font-medium text-gray-700 mb-1">Platillos *</label>
-  <button type="button" id="add-dishes-btn" class="w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-500 hover:text-blue-500 transition mb-2">
-    <i class="fas fa-plus mr-2"></i> Agregar platillos
-  </button>
+          <!-- Mesero -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Mesero *</label>
+            <select id="waiter-select"
+              class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
+              <option value="">Seleccione un mesero</option>
+              <!-- Se llena desde JS -->
+            </select>
+            <div id="waiter-error" class="hidden text-sm text-red-500">Por favor seleccione un mesero.</div>
+          </div>
 
-  <div class="text-sm font-medium text-gray-700 mb-1 flex justify-between items-center">
-    <span>Platillos seleccionados</span>
-    <span id="items-count" class="hidden bg-blue-100 text-blue-600 text-xs font-semibold px-2 py-0.5 rounded-full"></span>
+
+
+
+          <!-- Hora -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Hora</label>
+            <input type="text" id="order-time" class="w-full p-2 border border-gray-300 rounded-lg bg-gray-100"
+              readonly>
+          </div>
+
+          <!-- Platillos -->
+          <!-- Platillos -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Platillos *</label>
+            <button type="button" id="add-dishes-btn"
+              class="w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-blue-500 hover:text-blue-500 transition mb-2">
+              <i class="fas fa-plus mr-2"></i> Agregar platillos
+            </button>
+
+            <div class="text-sm font-medium text-gray-700 mb-1 flex justify-between items-center">
+              <span>Platillos seleccionados</span>
+              <span id="items-count"
+                class="hidden bg-blue-100 text-blue-600 text-xs font-semibold px-2 py-0.5 rounded-full"></span>
+            </div>
+
+            <div id="dishes-summary" class="mt-2 bg-gray-50 p-2 rounded-lg space-y-2 border border-gray-200">
+              <!-- Aquí se renderiza la lista de platillos dinámicamente -->
+            </div>
+
+            <div id="dishes-error" class="hidden text-sm text-red-500 mt-2">Por favor agregue al menos un platillo.
+            </div>
+          </div>
+
+
+          <!-- Lista visual de platillos seleccionados -->
+          <div id="selected-dishes-section" class="hidden mt-4">
+            <div class="flex justify-between items-center mb-2">
+              <span class="text-sm font-medium text-gray-700">Platillos seleccionados</span>
+              <span id="dish-count" class="bg-blue-100 text-blue-600 text-xs font-semibold px-2 py-0.5 rounded-full">0
+                items</span>
+            </div>
+
+            <div id="selected-dishes-list" class="space-y-2 bg-gray-50 rounded-lg p-2">
+              <!-- Los platillos seleccionados se insertarán aquí con JS -->
+            </div>
+          </div>
+
+          <!-- Agrega este campo en tu formulario -->
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Observaciones</label>
+            <textarea id="order-notes" placeholder="Observaciones del pedido (opcional)"
+              class="w-full p-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"></textarea>
+          </div>
+
+          <!-- Botón guardar -->
+          <div>
+            <button type="submit" id="save-order-btn"
+              class="w-full bg-blue-500 text-white py-3 rounded-lg font-medium hover:bg-blue-600 transition">
+              Guardar Pedido
+            </button>
+          </div>
+
+        </form>
+      </div>
+
+    </main>
+
+    <!-- BARRA INFERIOR TIPO WEB APP -->
+    <nav class="fixed bottom-0 left-0 right-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 px-2">
+      <a href="index.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-home text-lg mb-1"></i>
+        <span>Inicio</span>
+      </a>
+      <a href="tables.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-chair text-lg mb-1"></i>
+        <span>Mesas</span>
+      </a>
+      <a href="orders.html" class="flex flex-col items-center text-xs p-2 active-tab">
+        <i class="fas fa-clipboard-list text-lg mb-1"></i>
+        <span>Pedidos</span>
+      </a>
+      <a href="reservations.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-calendar-alt text-lg mb-1"></i>
+        <span>Reservas</span>
+      </a>
+      <a href="menu.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
+        <i class="fas fa-utensils text-lg mb-1"></i>
+        <span>Menú</span>
+      </a>
+    </nav>
+
   </div>
 
-  <div id="dishes-summary" class="mt-2 bg-gray-50 p-2 rounded-lg space-y-2 border border-gray-200">
-    <!-- Aquí se renderiza la lista de platillos dinámicamente -->
-  </div>
-
-  <div id="dishes-error" class="hidden text-sm text-red-500 mt-2">Por favor agregue al menos un platillo.</div>
-</div>
-
-
-        <!-- Lista visual de platillos seleccionados -->
-<div id="selected-dishes-section" class="hidden mt-4">
-  <div class="flex justify-between items-center mb-2">
-    <span class="text-sm font-medium text-gray-700">Platillos seleccionados</span>
-    <span id="dish-count" class="bg-blue-100 text-blue-600 text-xs font-semibold px-2 py-0.5 rounded-full">0 items</span>
-  </div>
-
-  <div id="selected-dishes-list" class="space-y-2 bg-gray-50 rounded-lg p-2">
-    <!-- Los platillos seleccionados se insertarán aquí con JS -->
-  </div>
-</div>
-
-        <!-- Botón guardar -->
-        <div>
-          <button type="submit" id="save-order-btn" class="w-full bg-blue-500 text-white py-3 rounded-lg font-medium hover:bg-blue-600 transition">
-            Guardar Pedido
-          </button>
-        </div>
-
-      </form>
-    </div>
-
-  </main>
-
-  <!-- BARRA INFERIOR TIPO WEB APP -->
-  <nav class="fixed bottom-0 left-0 right-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 px-2">
-    <a href="index.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-      <i class="fas fa-home text-lg mb-1"></i>
-      <span>Inicio</span>
-    </a>
-    <a href="tables.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-      <i class="fas fa-chair text-lg mb-1"></i>
-      <span>Mesas</span>
-    </a>
-    <a href="orders.html" class="flex flex-col items-center text-xs p-2 active-tab">
-      <i class="fas fa-clipboard-list text-lg mb-1"></i>
-      <span>Pedidos</span>
-    </a>
-    <a href="reservations.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-      <i class="fas fa-calendar-alt text-lg mb-1"></i>
-      <span>Reservas</span>
-    </a>
-    <a href="menu.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-      <i class="fas fa-utensils text-lg mb-1"></i>
-      <span>Menú</span>
-    </a>
-  </nav>
-
-</div>
-
-<script type="module" src="js/controllers/ordersController.js"></script>
+  <script type="module" src="js/controllers/ordersController.js"></script>
 </body>
+
 </html>

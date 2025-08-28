@@ -6,4 +6,6 @@ export const API = {
   estadoMesa: `${API_BASE}/apiEstadoMesa`,
   platillo: `${API_BASE}/apiPlatillo`,
   categoria: `${API_BASE}/apiCategoria`,
+  pedido: `${API_BASE}/apiPedido`,
+  empleado: `${API_BASE}/apiEmpleado`,
 };
