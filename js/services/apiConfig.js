@@ -8,4 +8,5 @@ export const API = {
   categoria: `${API_BASE}/apiCategoria`,
   pedido: `${API_BASE}/apiPedido`,
   empleado: `${API_BASE}/apiEmpleado`,
+  reserva: `${API_BASE}/apiReserva`
 };
