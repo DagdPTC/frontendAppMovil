@@ -1,11 +1,4 @@
 // js/controllers/ordersController.js
-// Vista de pedidos conectada a la API real.
-// - GET/DELETE funcionando
-// - Selección de platillos via sessionStorage (desde menu.html)
-// - Form se reabre al volver del Menú
-// - Mesero dinámico (GET a /apiEmpleado)
-// - POST en serie (1 registro por platillo), payload "limpio"
-// - Lista con + / − / 🗑 en el form
 
 import {
   getPedidos,
@@ -13,79 +6,411 @@ import {
   updatePedido,
   deletePedido,
   getEstadosPedido,
+  getEmpleados,
+  getMesasForOrders,
 } from "../services/ordersService.js";
+import { getPlatillos } from "../services/menuService.js";
 
-import { getPlatillos } from "../services/menuService.js"; // para mapear idPlatillo -> nombre
-import { API } from "../services/apiConfig.js";            // para llamar a /apiEmpleado
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-/* --------- Colores para Píldora de estado (fallback) --------- */
-const PEDIDO_STATUS_COLORS = {
-  pendiente: "bg-yellow-100 text-yellow-700",
-  "en preparación": "bg-blue-100 text-blue-700",
-  listo: "bg-green-100 text-green-700",
-  entregado: "bg-purple-100 text-purple-700",
-  pagado: "bg-gray-200 text-gray-700",
-  cancelado: "bg-red-100 text-red-700",
-};
+let editingId = null;
 
-/* Fallback si no hay catálogo en API */
-const FALLBACK_ESTADOS = [
-  { id: 1, nombre: "pendiente" },
-  { id: 2, nombre: "en preparación" },
-  { id: 3, nombre: "listo" },
-  { id: 4, nombre: "entregado" },
-  { id: 5, nombre: "pagado" },
-  { id: 6, nombre: "cancelado" },
-];
+const K_SEL       = "ord_dishes_sel";
+const K_OPEN_FORM = "abrirFormularioPedido";
+const K_CLIENTE   = "clienteTemporal";
+const K_MESA      = "mesaTemporal";
+const K_WAITER    = "waiterTemporal";
 
-/* --------- Estado global --------- */
-let MAP_ESTADOS   = new Map();   // id -> {id, nombre}
-let MAP_PLATILLOS = new Map();   // id -> {id, nomPlatillo, precio}
-let MAP_EMPLEADOS = new Map();   // id -> {id, nombre}
+const LOCK_KEY    = "mesas_locked_by_orders"; // para bloquear cambios en pantallas de Mesas
 
-/* --------- Utils --------- */
-function formatFecha(isoOrYmd) {
-  if (!isoOrYmd) return "";
-  const [y, m, d] = String(isoOrYmd).split("-");
-  if (y && m && d) return `${d}/${m}/${y}`;
-  try {
-    const dt = new Date(isoOrYmd);
-    const dd = String(dt.getDate()).padStart(2, "0");
-    const mm = String(dt.getMonth() + 1).padStart(2, "0");
-    const yy = dt.getFullYear();
-    return `${dd}/${mm}/${yy}`;
-  } catch {
-    return String(isoOrYmd);
+const PILL_NEUTRAL = "estado-pill text-xs px-2 py-1 rounded bg-gray-100 text-gray-700 capitalize";
+
+let MAP_ESTADOS   = new Map();  // id -> {id, nombre}
+let ESTADOS_ORDER = [];         // [{id,nombre}] ordenado por id
+let MAP_PLATILLOS = new Map();
+let MAP_EMPLEADOS = new Map();
+
+/* ===========================================================
+   FANCY SELECT (chips + búsqueda + animación, accesible)
+   =========================================================== */
+function upgradeSelect(nativeSelect, opts = {}) {
+  if (!nativeSelect || nativeSelect._fancy) return;
+  const multiple = nativeSelect.hasAttribute("multiple") || !!opts.multiple;
+  const placeholder = opts.placeholder || "Seleccione…";
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "fancy-select relative w-full";
+  nativeSelect.insertAdjacentElement("afterend", wrapper);
+
+  nativeSelect.classList.add("sr-only");
+  nativeSelect.setAttribute("tabindex", "-1");
+  nativeSelect.style.position = "absolute";
+  nativeSelect.style.left = "-99999px";
+
+  const control = document.createElement("button");
+  control.type = "button";
+  control.className = [
+    "fs-control w-full rounded-xl border border-gray-300 bg-white px-3 py-2",
+    "flex items-center flex-wrap gap-2 text-sm md:text-base",
+    "shadow-sm hover:shadow transition focus:outline-none focus:ring-2 focus:ring-blue-500"
+  ].join(" ");
+
+  const chips = document.createElement("div");
+  chips.className = "fs-chips flex items-center gap-1 flex-1 min-w-0";
+  const ph = document.createElement("span");
+  ph.className = "fs-placeholder text-gray-400 truncate";
+  ph.textContent = placeholder;
+  chips.appendChild(ph);
+
+  const caret = document.createElement("span");
+  caret.className = "ml-auto transition-transform";
+  caret.innerHTML = "▾";
+
+  control.append(chips, caret);
+  wrapper.appendChild(control);
+
+  const panel = document.createElement("div");
+  panel.className = [
+    "fs-panel absolute left-0 right-0 top-[calc(100%+6px)] z-50",
+    "origin-top rounded-xl border border-gray-200 bg-white shadow-lg p-2",
+    "opacity-0 scale-95 pointer-events-none transition-all"
+  ].join(" ");
+
+  const searchWrap = document.createElement("div");
+  searchWrap.className = "mb-2";
+  const search = document.createElement("input");
+  search.type = "text";
+  search.placeholder = "Buscar…";
+  search.className = "w-full rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+  searchWrap.appendChild(search);
+  panel.appendChild(searchWrap);
+
+  const list = document.createElement("div");
+  list.className = "max-h-64 overflow-auto space-y-1";
+  panel.appendChild(list);
+
+  wrapper.appendChild(panel);
+
+  function readOptions() {
+    return Array.from(nativeSelect.options).map(o => ({
+      value: o.value, label: o.textContent.trim(), disabled: o.disabled, selected: o.selected
+    }));
+  }
+  function renderList(filter = "") {
+    const q = filter.trim().toLowerCase();
+    list.innerHTML = "";
+    readOptions().forEach(opt => {
+      if (q && !opt.label.toLowerCase().includes(q)) return;
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = [
+        "w-full text-left px-3 py-2 rounded-lg",
+        opt.disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-50",
+        "flex items-center gap-2 border border-transparent"
+      ].join(" ");
+      row.disabled = !!opt.disabled;
+      row.dataset.value = opt.value;
+
+      const mark = document.createElement("span");
+      mark.className = "shrink-0 w-4";
+      mark.textContent = opt.selected ? "•" : "";
+      const lbl = document.createElement("span");
+      lbl.textContent = opt.label;
+      lbl.className = "truncate";
+
+      row.append(mark, lbl);
+      row.addEventListener("click", () => {
+        if (multiple) {
+          nativeSelect.querySelector(`option[value="${CSS.escape(opt.value)}"]`).selected = !opt.selected;
+        } else {
+          nativeSelect.value = opt.value;
+        }
+        nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        syncControl();
+        renderList(search.value);
+        if (!multiple) close();
+      });
+
+      list.appendChild(row);
+    });
+  }
+  function syncControl() {
+    const opts = readOptions().filter(o => o.selected);
+    chips.innerHTML = "";
+    if (!opts.length) {
+      chips.appendChild(ph);
+    } else {
+      const maxChips = 1;
+      opts.slice(0, maxChips).forEach(o => {
+        const chip = document.createElement("span");
+        chip.className = "px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-sm flex items-center gap-1";
+        chip.innerHTML = `<span class="truncate">${o.label}</span>`;
+        if (multiple) {
+          const x = document.createElement("button");
+          x.type = "button";
+          x.textContent = "×";
+          x.className = "ml-1 opacity-70 hover:opacity-100";
+          x.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            nativeSelect.querySelector(`option[value="${CSS.escape(o.value)}"]`).selected = false;
+            nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+            syncControl(); renderList(search.value);
+          });
+          chip.appendChild(x);
+        }
+        chips.appendChild(chip);
+      });
+      if (opts.length > maxChips) {
+        const more = document.createElement("span");
+        more.className = "px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-sm";
+        more.textContent = `+${opts.length - maxChips}`;
+        chips.appendChild(more);
+      }
+    }
+  }
+  function open() {
+    panel.classList.remove("pointer-events-none");
+    panel.style.opacity = "1";
+    panel.style.transform = "scale(1)";
+    caret.style.transform = "rotate(180deg)";
+    search.focus();
+  }
+  function close() {
+    panel.classList.add("pointer-events-none");
+    panel.style.opacity = "0";
+    panel.style.transform = "scale(.95)";
+    caret.style.transform = "rotate(0deg)";
+  }
+  function toggle() {
+    const openNow = panel.style.opacity === "1";
+    openNow ? close() : open();
+  }
+
+  control.addEventListener("click", toggle);
+  search.addEventListener("input", () => renderList(search.value));
+  document.addEventListener("click", (e) => { if (!wrapper.contains(e.target)) close(); });
+  nativeSelect.addEventListener("change", () => { syncControl(); renderList(search.value); });
+
+  syncControl();
+  renderList();
+
+  nativeSelect._fancy = { wrapper, control, open, close, sync: syncControl, isFancy: true };
+}
+
+/* ===========================================================
+   SKIN / MODERN LOOK & FEEL (sin cambiar funcionalidad)
+   =========================================================== */
+function applyModernSkin() {
+  const form = document.getElementById("new-order-form");
+  if (form) form.classList.add("rounded-2xl","bg-white","border","border-gray-200","shadow-md","p-4","md:p-6","animate-[fadeIn_.25s_ease]");
+  const list = document.getElementById("orders-list");
+  if (list) list.classList.add("grid","gap-4","md:grid-cols-2","xl:grid-cols-3");
+
+  [["new-order-btn","bg-blue-600 hover:bg-blue-700"],
+   ["save-order-btn","bg-blue-600 hover:bg-blue-700"],
+   ["back-to-orders","bg-gray-200 hover:bg-gray-300"],
+   ["add-dishes-btn","bg-emerald-500 hover:bg-emerald-600"]]
+  .forEach(([id, cls]) => {
+    const b = document.getElementById(id);
+    if (b) {
+      b.classList.add(...("text-white rounded-xl px-4 py-2 transition shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500".split(" ")));
+      cls.split(" ").forEach(c => b.classList.add(c));
+      b.addEventListener("click", () => {
+        const s = document.createElement("span");
+        s.className = "absolute inset-0 rounded-xl animate-[ping_.6s_ease-out] bg-white/30 pointer-events-none";
+        b.style.position = "relative";
+        b.appendChild(s);
+        setTimeout(()=>s.remove(),600);
+      });
+    }
+  });
+
+  const style = document.createElement("style");
+  style.textContent = `@keyframes fadeIn { from {opacity:0; transform: translateY(4px)} to {opacity:1; transform:none} }`;
+  document.head.appendChild(style);
+}
+
+/* =========================
+   ALERTAS (info / error / success) — sin emojis
+   ========================= */
+function ensureAlertHost() {
+  let host = document.getElementById("alerts-host");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "alerts-host";
+    host.setAttribute("aria-live", "polite");
+    host.className = "fixed top-4 right-4 z-50 space-y-3 pointer-events-none";
+    document.body.appendChild(host);
+  }
+  return host;
+}
+function showAlert(type = "info", text = "", opts = {}) {
+  const { timeout = 3500 } = opts;
+  const host = ensureAlertHost();
+  const wrap = document.createElement("div");
+  const color = { info: "bg-blue-500", error: "bg-red-500", success: "bg-green-500" }[type] || "bg-blue-500";
+
+  wrap.className =
+    `pointer-events-auto rounded-xl px-4 py-3 shadow-lg text-white flex items-center gap-3 w-[min(92vw,380px)] ${color}`;
+  wrap.innerHTML = `
+    <div class="font-medium">${text}</div>
+    <button class="ml-auto opacity-80 hover:opacity-100 focus:outline-none">✕</button>
+  `;
+  host.appendChild(wrap);
+
+  const close = () => {
+    try {
+      wrap.style.transition = "opacity .25s ease, transform .25s ease";
+      wrap.style.opacity = "0";
+      wrap.style.transform = "translateY(-6px)";
+      setTimeout(() => wrap.remove(), 200);
+    } catch { wrap.remove(); }
+  };
+  wrap.querySelector("button")?.addEventListener("click", close);
+  if (timeout) setTimeout(close, timeout);
+}
+
+/* =========================
+   MODAL CONFIRM (bonito)
+   ========================= */
+function showConfirm({ title = "Confirmar", message = "", confirmText = "Aceptar", cancelText = "Cancelar", variant = "default" } = {}) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm";
+
+    const card = document.createElement("div");
+    card.className = "w-[min(92vw,380px)] rounded-2xl bg-white shadow-xl border border-gray-200 p-4 animate-[fadeIn_.2s_ease]";
+    card.innerHTML = `
+      <div class="flex items-start gap-3">
+        <div class="flex-1">
+          <div class="text-base font-semibold mb-1">${title}</div>
+          <div class="text-sm text-gray-600">${message}</div>
+        </div>
+        <button class="btn-x text-gray-500 hover:text-gray-700">✕</button>
+      </div>
+      <div class="mt-4 flex gap-2 justify-end">
+        <button class="btn-cancel rounded-lg px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800">${cancelText}</button>
+        <button class="btn-ok rounded-lg px-3 py-2 text-white ${variant === "danger" ? "bg-red-600 hover:bg-red-700" : "bg-blue-600 hover:bg-blue-700"}">${confirmText}</button>
+      </div>
+    `;
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    const cleanup = (val) => { overlay.remove(); resolve(val); };
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) cleanup(false); });
+    card.querySelector(".btn-x").addEventListener("click", () => cleanup(false));
+    card.querySelector(".btn-cancel").addEventListener("click", () => cleanup(false));
+    card.querySelector(".btn-ok").addEventListener("click", () => cleanup(true));
+  });
+}
+
+/* =========================
+   Helpers: limpiar / snapshots / locks mesas / API mesa
+   ========================= */
+function clearSnapshots() {
+  localStorage.removeItem(K_CLIENTE);
+  localStorage.removeItem(K_MESA);
+  sessionStorage.removeItem(K_WAITER);
+  sessionStorage.removeItem(K_OPEN_FORM);
+}
+function resetOrderForm() {
+  const name = $("#customer-name");
+  const table = $("#table-select");
+  const waiter = $("#waiter-select");
+  const estado = $("#status-select");
+  const notes = $("#order-notes");
+
+  if (name) name.value = "";
+  if (notes) notes.value = "";
+
+  if (table) { table.value = ""; table.dispatchEvent(new Event("change", { bubbles: true })); }
+  if (waiter) { waiter.value = ""; waiter.dispatchEvent(new Event("change", { bubbles: true })); }
+  if (estado) {
+    // default al primer estado cargado
+    if (ESTADOS_ORDER[0]) estado.value = String(ESTADOS_ORDER[0].id);
+    else estado.value = "";
+    estado.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  setSeleccion([]); renderSeleccionUI();
+  const saveBtn = $("#save-order-btn"); if (saveBtn) saveBtn.textContent = "Guardar pedido";
+}
+
+// ---- locks mesas (local) ----
+function getLockedSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(LOCK_KEY) || "[]")); } catch { return new Set(); }
+}
+function saveLockedSet(set) { localStorage.setItem(LOCK_KEY, JSON.stringify([...set])); }
+function lockMesaLocal(idMesa) {
+  const s = getLockedSet(); s.add(String(idMesa)); saveLockedSet(s);
+}
+function unlockMesaLocal(idMesa) {
+  const s = getLockedSet(); s.delete(String(idMesa)); saveLockedSet(s);
+}
+window.isMesaLockedByOrder = (idMesa) => getLockedSet().has(String(idMesa)); // util p/ pantalla Mesas
+
+// ---- API Mesa (best-effort; ajusta si tu backend difiere) ----
+// === API Mesa (endpoint real) ===
+const API_HOST = "http://localhost:8080";
+
+async function tryUpdateMesaEstado(idMesa, idEstadoMesa) {
+  const url = `${API_HOST}/apiMesa/estado/${idMesa}/${idEstadoMesa}`;
+  const res = await fetch(url, { method: "PATCH" });
+  return res.ok;
+}
+
+async function ocuparMesa(idMesa)  { await tryUpdateMesaEstado(idMesa, 2); } // Ocupada
+async function liberarMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 1); } // Disponible
+
+/* =========================
+   ESTADOS (dinámicos desde BD)
+   ========================= */
+async function cargarEstadosYSelect() {
+  const raw = await getEstadosPedido().catch(() => []);
+  MAP_ESTADOS = new Map(
+    raw.map(e => {
+      const id = Number(e.id ?? e.idEstadoPedido ?? e.ID ?? e.Id ?? e.IdEstadoPedido ?? e.IDESTADOPEDIDO);
+      const nombre = String(e.nomEstado ?? e.nomEstadoPedido ?? e.nombre ?? e.nombreEstado ?? e.estado ?? e.NOMBREESTADO ?? "").trim();
+      return { id, nombre };
+    }).filter(x => Number.isFinite(x.id) && x.nombre)
+      .map(x => [x.id, x])
+  );
+  ESTADOS_ORDER = Array.from(MAP_ESTADOS.values()).sort((a,b)=>a.id - b.id);
+
+  const selEstado = $("#status-select");
+  if (selEstado) {
+    selEstado.innerHTML = "";
+    ESTADOS_ORDER.forEach(est => {
+      const opt = document.createElement("option");
+      opt.value = String(est.id);
+      opt.textContent = est.nombre;
+      selEstado.appendChild(opt);
+    });
+    if (ESTADOS_ORDER[0]) selEstado.value = String(ESTADOS_ORDER[0].id);
+    upgradeSelect(selEstado, { placeholder: "Estado" });
   }
 }
-
-function estadoNombrePorId(id) {
-  const item = MAP_ESTADOS.get(Number(id));
-  return (item?.nombre || "").toString().toLowerCase();
-}
-function MAP_ESTADOS_HAS_NAME(nombre) {
-  const n = (nombre || "").toLowerCase();
-  for (const [id, obj] of MAP_ESTADOS.entries()) {
-    if ((obj?.nombre || "").toLowerCase() === n) return id;
-  }
-  return null;
+function nextEstadoId(currentId) {
+  if (!ESTADOS_ORDER.length) return undefined;
+  const idx = ESTADOS_ORDER.findIndex(e => e.id === Number(currentId));
+  if (idx === -1) return ESTADOS_ORDER[0].id;
+  return ESTADOS_ORDER[(idx + 1) % ESTADOS_ORDER.length].id;
 }
 
-/* --------- DOM & Storage --------- */
-const $  = (s, r=document) => r.querySelector(s);
-const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
-
-const K_SEL       = "ord_dishes_sel";      // lo escribe el Menú: [{id, nombre, precio, qty}]
-const K_CLIENTE   = "orderly_cliente_nombre";
-const K_MESA      = "orderly_mesa_id";
-const K_OPEN_FORM = "ord_open_form";
-const K_WAITER    = "orderly_waiter_id";
-
+/* =========================
+   Selección de platillos
+   ========================= */
 function getSeleccion() {
   try { return JSON.parse(sessionStorage.getItem(K_SEL) || "[]"); } catch { return []; }
 }
-function setSeleccion(v) { sessionStorage.setItem(K_SEL, JSON.stringify(v)); }
+function setSeleccion(v) {
+  sessionStorage.setItem(K_SEL, JSON.stringify(v || []));
+}
 
+/* =========================
+   Snapshots del form
+   ========================= */
 function saveFormSnapshot() {
   localStorage.setItem(K_CLIENTE, ($("#customer-name")?.value || "").trim());
   localStorage.setItem(K_MESA, $("#table-select")?.value || "");
@@ -95,123 +420,506 @@ function restoreFormSnapshot() {
   const name = localStorage.getItem(K_CLIENTE);
   const mesa = localStorage.getItem(K_MESA);
   if (name) $("#customer-name").value = name;
-  if (mesa) $("#table-select").value  = mesa;
+  if (mesa) $("#table-select").value = mesa;
+  localStorage.removeItem(K_CLIENTE);
+  localStorage.removeItem(K_MESA);
 }
-
-/* --------- Empleados (GET directo desde aquí, sin service extra) --------- */
-function pickArray(payload) {
-  if (!payload) return [];
-  if (Array.isArray(payload?.content)) return payload.content;
-  if (Array.isArray(payload)) return payload;
-  return [];
-}
-async function getJSON(url) {
-  const res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-cache" });
-  const txt = await res.text().catch(() => "");
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${txt}`);
-  return txt ? JSON.parse(txt) : null;
-}
-function normalizeEmpleado(e) {
-  if (!e || typeof e !== "object") return null;
-
-  // ID robusto (acepta varias variantes comunes)
-  const id =
-    Number(e.id) ??
-    Number(e.idEmpleado) ??
-    Number(e.ID) ??
-    Number(e.Id);
-
-  // Nombre robusto (toma el primero que exista; arma nombres + apellidos si están)
-  let nombre =
-    e.nomEmpleado ??
-    e.nombre ??
-    (e.nombres && e.apellidos ? `${e.nombres} ${e.apellidos}` : (e.nombres || e.apellidos)) ??
-    e.usuario ??  // por si solo viene el user
-    "";
-
-  // Si no hubo ningún nombre, usa "Empleado {id}" como fallback
-  if (!nombre && Number.isFinite(id)) nombre = `Empleado ${id}`;
-
-  // Validación final
-  if (!Number.isFinite(id) || !String(nombre).trim()) return null;
-
-  return { id: Number(id), nombre: String(nombre).trim() };
-}
-
-async function getEmpleados(page=0) {
-  if (!API?.empleado) return [];
-  const sizes = [50, 20, 10, null];
-  for (const s of sizes) {
-    const url = s == null
-      ? `${API.empleado}/getDataEmpleado?page=${page}`
-      : `${API.empleado}/getDataEmpleado?page=${page}&size=${s}`;
-    try {
-      const data = await getJSON(url);
-      const arr = pickArray(data).map(normalizeEmpleado).filter(Boolean);
-      if (arr.length) return arr;
-    } catch {}
+function restoreWaiter(waiterSelect) {
+  if (!waiterSelect) return;
+  const saved = sessionStorage.getItem(K_WAITER);
+  if (saved && waiterSelect.querySelector(`option[value="${saved}"]`)) {
+    waiterSelect.value = saved;
   }
-  return [];
 }
 
-/* --------- Mapeo API -> UI (AJUSTADO A TU JSON) --------- */
+/* =========================
+   Catálogos
+   ========================= */
+async function cargarCatalogos() {
+  await cargarEstadosYSelect();
+  const plats = await getPlatillos(0).catch(() => []);
+  MAP_PLATILLOS = new Map(
+    plats.map(p => [Number(p.id), { id: Number(p.id), nomPlatillo: p.nombre, precio: Number(p.precio || 0) }])
+  );
+}
+async function cargarEmpleados(waiterSelect) {
+  if (!waiterSelect) return;
+  waiterSelect.innerHTML = `<option value="">Seleccione un mesero</option>`;
+  const arr = await getEmpleados(0).catch(() => []);
+  MAP_EMPLEADOS = new Map(arr.map(e => [Number(e.id), e]));
+  for (const e of arr) {
+    const opt = document.createElement("option");
+    opt.value = String(e.id);
+    opt.textContent = e.nombre;
+    waiterSelect.appendChild(opt);
+  }
+  waiterSelect.className =
+    "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base bg-white shadow-sm";
+  restoreWaiter(waiterSelect);
+  upgradeSelect(waiterSelect, { placeholder: "Mesero" });
+}
+
+/* =========================
+   Mesas (select con estado)
+   ========================= */
+function nombreEstadoMesa(m) {
+  const idEstado = Number(
+    m.idEstadoMesa ?? m.IdEstadoMesa ??
+    (m.estadoMesa && (m.estadoMesa.id ?? m.estadoMesa.Id)) ??
+    (m.estado && (m.estado.id ?? m.estado.Id))
+  );
+  if (Number.isFinite(idEstado)) {
+    if (idEstado === 1) return "disponible";
+    if (idEstado === 2) return "ocupada";
+    if (idEstado === 3) return "reservada";
+    if (idEstado === 4) return "limpieza";
+  }
+  const raw = (
+    m.nomEstadoMesa ?? m.nomEstado ??
+    (m.estadoMesa && (m.estadoMesa.nomEstado ?? m.estadoMesa.nombre ?? m.estadoMesa.estado)) ??
+    (m.estado && (m.estado.nomEstado ?? m.estado.nombre ?? m.estado.estado)) ??
+    m.estado ?? ""
+  ).toString().toLowerCase();
+  if (raw.includes("dispon")) return "disponible";
+  if (raw.includes("ocup"))   return "ocupada";
+  if (raw.includes("reserv")) return "reservada";
+  if (raw.includes("limp"))   return "limpieza";
+  return "desconocido";
+}
+async function cargarMesasSelect() {
+  const sel = $("#table-select");
+  if (!sel) return;
+
+  sel.className =
+    "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base bg-white shadow-sm";
+  sel.innerHTML = `<option value="">Seleccione una mesa</option>`;
+
+  let mesas = [];
+  try { mesas = await getMesasForOrders(0); } catch (e) { console.error(e); }
+
+  mesas
+    .sort((a,b) => Number(a.numMesa ?? a.numero ?? a.id ?? 0) - Number(b.numMesa ?? b.numero ?? b.id ?? 0))
+    .forEach(m => {
+      const idMesa = Number(m.idMesa ?? m.id ?? m.Id ?? m.ID);
+      const numero = String(m.numMesa ?? m.numero ?? idMesa ?? "");
+      const estado = nombreEstadoMesa(m);
+      const isBusy = (estado === "ocupada" || estado === "reservada" || estado === "limpieza");
+
+      const opt = document.createElement("option");
+      opt.value = String(idMesa);
+      opt.textContent = isBusy ? `Mesa ${numero} (${estado})` : `Mesa ${numero}`;
+      if (isBusy) opt.disabled = true;
+      sel.appendChild(opt);
+    });
+
+  const snapMesa = localStorage.getItem(K_MESA);
+  if (snapMesa) {
+    const o = sel.querySelector(`option[value="${snapMesa}"]`);
+    if (o && !o.disabled) sel.value = snapMesa;
+    else localStorage.removeItem(K_MESA);
+  }
+
+  upgradeSelect(sel, { placeholder: "Mesa" });
+}
+
+/* =========================
+   Normalizador pedido UI
+   ========================= */
 function fromApi(p) {
-  const id = p.id;
-  const nombreCliente = p.nombrecliente || p.nombreCliente || p.cliente || "";
-  const mesa = p.idMesa ?? p.mesa ?? "";
-  const fecha = formatFecha(p.fpedido || p.fecha || p.fechaPedido);
-  const idEstado = p.idEstadoPedido ?? p.estadoId ?? p.idEstado ?? 1;
-  const estadoNombre = estadoNombrePorId(idEstado) || "pendiente";
-
-  // Nombre de platillo por catálogo
-  const platInfo = MAP_PLATILLOS.get(Number(p.idPlatillo)) || null;
-  const nombrePlatillo = platInfo?.nomPlatillo || platInfo?.nombre || `Platillo ${p.idPlatillo}`;
-
-  // Mesero: usa mapa si está cargado
-  const meseroNombre = MAP_EMPLEADOS.get(Number(p.idEmpleado))?.nombre || `Empleado ${p.idEmpleado ?? ""}`.trim();
+  const id = Number(p.id ?? p.Id ?? p.idPedido ?? p.ID);
+  const fecha = (p.fpedido ?? p.FPedido ?? p.fecha ?? p.fechaPedido ?? "").toString();
+  const estadoId = Number(p.idEstadoPedido ?? p.IdEstadoPedido ?? p.estadoId ?? 0);
+  const estadoNombre = MAP_ESTADOS.get(estadoId)?.nombre || "";
+  const nombreCliente = (p.nombrecliente ?? p.Nombrecliente ?? p.cliente ?? p.Cliente ?? "").toString();
+  const idMesa = Number(p.idMesa ?? p.IdMesa ?? p.mesaId ?? 0);
+  const nombrePlatillo = (p.platillo?.nomPlatillo ?? p.Platillo?.nomPlatillo ?? p.nomPlatillo ?? p.platilloNombre ?? "").toString();
+  const platInfo = MAP_PLATILLOS.get(Number(p.idPlatillo ?? p.IdPlatillo));
 
   return {
     id,
     Cliente: nombreCliente,
-    Mesa: String(mesa),
-    Mesero: meseroNombre,
+    Mesa: String(idMesa || ""),
+    Mesero: "",
     Hora: fecha,
     Estado: estadoNombre,
-    Confirmado: estadoNombre === "pagado" || estadoNombre === "cancelado",
-
     Platillos: [
       {
-        nombre: nombrePlatillo,
-        cantidad: Number(p.cantidad ?? 1),
-        precio: Number(platInfo?.precio ?? 0),
-      },
+        nombre: nombrePlatillo || (platInfo?.nomPlatillo ?? "Platillo"),
+        cantidad: Number(p.cantidad ?? p.Cantidad ?? 1),
+        precio: Number(platInfo?.precio ?? p.precio ?? 0),
+        idPlatillo: Number(p.idPlatillo ?? p.IdPlatillo)
+      }
     ],
+    _subtotal: Number(p.subtotal ?? p.Subtotal ?? 0),
+    _propina:  Number(p.propina  ?? p.Propina  ?? 0),
+    _total:    Number(p.totalPedido ?? p.TotalPedido ?? 0),
 
-    _subtotal: Number(p.subtotal ?? 0),
-    _propina: Number(p.propina ?? 0),
-    _total: Number(p.totalPedido ?? 0),
-
-    _raw: {
-      cantidad: p.cantidad,
-      totalPedido: p.totalPedido,
-      subtotal: p.subtotal,
-      propina: p.propina,
-      fpedido: p.fpedido,
-      observaciones: p.observaciones,
-      nombrecliente: p.nombrecliente,
-      idMesa: p.idMesa,
-      idEmpleado: p.idEmpleado,
-      idEstadoPedido: idEstado,
-      idPlatillo: p.idPlatillo,
-    },
+    idMesa,
+    idEmpleado: Number(p.idEmpleado ?? p.IdEmpleado ?? 0),
+    idEstadoPedido: estadoId,
+    idPlatillo: Number(p.idPlatillo ?? p.IdPlatillo ?? 0),
+    Observaciones: (p.observaciones ?? p.Observaciones ?? "").toString()
   };
 }
 
-/* --------- Carga inicial --------- */
+/* =========================
+   Tarjeta de pedido
+   ========================= */
+function agregarTarjetaPedido(pedido, container) {
+  const card = document.createElement("div");
+  card.className = "tarjeta-animada border border-gray-200 rounded-xl p-4 bg-white shadow-sm transition";
+
+  const listaPlatillos = pedido.Platillos.map(x => `<li>${x.nombre} (x${x.cantidad})</li>`).join("");
+  const total    = Number(pedido._total || 0).toFixed(2);
+  const subtotal = Number(pedido._subtotal || 0).toFixed(2);
+  const propina  = Number(pedido._propina || 0).toFixed(2);
+
+  card.innerHTML = `
+    <div class="flex justify-between items-start">
+      <div>
+        <div class="text-sm text-gray-500">Cliente</div>
+        <div class="text-lg font-semibold">${pedido.Cliente || "-"}</div>
+      </div>
+      <button class="${PILL_NEUTRAL}" title="Cambiar estado">
+        ${pedido.Estado || "—"}
+      </button>
+    </div>
+    <div class="mt-2 text-sm">
+      <div><strong>Mesa:</strong> ${pedido.Mesa || "-"}</div>
+      <div><strong>Fecha:</strong> ${pedido.Hora || "-"}</div>
+    </div>
+    <div class="mt-3">
+      <ul class="text-sm list-disc list-inside text-gray-700">
+        ${listaPlatillos || "<li>(sin platillos)</li>"}
+      </ul>
+    </div>
+    <div class="mt-3 text-sm text-gray-700">
+      <div><strong>Subtotal:</strong> $${subtotal}</div>
+      <div><strong>Propina (10%):</strong> $${propina}</div>
+      <div><strong>Total:</strong> $${total}</div>
+    </div>
+    <div class="mt-4 flex gap-2">
+      <button class="btn-editar px-3 py-1 rounded bg-blue-500 text-white">Editar</button>
+      <button class="btn-eliminar px-3 py-1 rounded bg-red-500 text-white">Eliminar</button>
+    </div>
+  `;
+
+  // Eliminar con confirm modal
+  card.querySelector(".btn-eliminar").addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    const ok = await showConfirm({
+      title: "Eliminar pedido",
+      message: "¿Estás seguro de eliminar este pedido? Esta acción no se puede deshacer.",
+      confirmText: "Eliminar",
+      cancelText: "Cancelar",
+      variant: "danger",
+    });
+    if (!ok) {
+      showAlert("info", "Operación cancelada");
+      return;
+    }
+    try {
+      await deletePedido(pedido.id);
+      card.remove();
+      showAlert("success", "Pedido eliminado correctamente");
+      // liberar mesa
+      const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
+      if (idMesa) await liberarMesa(idMesa);
+    } catch (e) {
+      showAlert("error", e.message || "No se pudo eliminar el pedido");
+    }
+  });
+
+  // Editar
+  card.querySelector(".btn-editar").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    abrirEdicionDesdeCard(pedido);
+  });
+
+  // Cambiar estado
+  card.querySelector(".estado-pill").addEventListener("click", async (ev) => {
+    ev.stopPropagation();
+    try {
+      if (!ESTADOS_ORDER.length) await cargarEstadosYSelect();
+      const newId = nextEstadoId(pedido.idEstadoPedido);
+      if (!Number.isFinite(newId)) throw new Error("No hay estados configurados.");
+
+      const item = (pedido.Platillos && pedido.Platillos[0]) || { cantidad: 1, precio: 0, idPlatillo: pedido.idPlatillo };
+      const qty = Number(item.cantidad || 1);
+      const precio = Number(item.precio || 0);
+      const subtotal = +(qty * precio).toFixed(2);
+      const propina  = +(subtotal * 0.10).toFixed(2);
+      const total    = +(subtotal + propina).toFixed(2);
+
+      const d = new Date();
+      const fpedido = (pedido.Hora && /^\d{4}-\d{2}-\d{2}/.test(pedido.Hora))
+        ? pedido.Hora.slice(0,10)
+        : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+
+      await updatePedido(pedido.id, {
+        cantidad: qty,
+        subtotal,
+        propina,
+        totalPedido: total,
+        fpedido,
+        observaciones: pedido.Observaciones || "Sin observaciones",
+        nombrecliente: pedido.Cliente || "Cliente",
+        idMesa: Number(pedido.idMesa || pedido.Mesa || 0),
+        idEmpleado: Number(pedido.idEmpleado || 0),
+        idEstadoPedido: newId,
+        idPlatillo: Number(item.idPlatillo || pedido.idPlatillo || 0)
+      });
+
+      pedido.idEstadoPedido = newId;
+      const newName = MAP_ESTADOS.get(newId)?.nombre || "";
+      pedido.Estado = newName;
+      const pill = card.querySelector(".estado-pill");
+      if (pill && newName) pill.textContent = newName;
+
+      // si pasa a cancelado/anulado, liberar mesa
+      if ((newName || "").toLowerCase().includes("cancel")) {
+        const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
+        if (idMesa) await liberarMesa(idMesa);
+      }
+
+      showAlert("success", `Estado actualizado a "${newName}"`);
+    } catch (e) {
+      showAlert("error", e.message || "No se pudo cambiar el estado");
+    }
+  });
+
+  container.appendChild(card);
+}
+
+/* =========================
+   Edición
+   ========================= */
+function abrirEdicionDesdeCard(pedido) {
+  editingId = Number(pedido.id);
+
+  $("#customer-name").value  = pedido.Cliente || "";
+  $("#table-select").value   = String(pedido.idMesa || "");
+  $("#waiter-select").value  = String(pedido.idEmpleado || "");
+
+  const selEstado = $("#status-select");
+  if (selEstado && selEstado.querySelector(`option[value="${pedido.idEstadoPedido}"]`)) {
+    selEstado.value = String(pedido.idEstadoPedido);
+  }
+
+  $("#order-notes").value    = pedido.Observaciones || "";
+
+  const sel = (pedido.Platillos || []).map(pl => ({
+    id: pl.idPlatillo || 0,
+    nombre: pl.nombre,
+    precio: Number(pl.precio || 0),
+    qty: Number(pl.cantidad || 1)
+  }));
+  setSeleccion(sel);
+  renderSeleccionUI();
+
+  const saveBtn = $("#save-order-btn");
+  if (saveBtn) saveBtn.textContent = "Actualizar pedido";
+
+  $("#new-order-form").classList.remove("hidden");
+  $("#orders-list").classList.add("hidden");
+  $("#new-order-btn").classList.add("hidden");
+}
+
+/* =========================
+   Lista
+   ========================= */
+function emptyState(msg) {
+  return `
+    <div class="w-full py-12 flex items-center justify-center">
+      <div class="text-center text-gray-500">
+        <div class="text-lg font-medium mb-1">Sin pedidos</div>
+        <div class="text-sm">${msg || "No hay pedidos para mostrar."}</div>
+      </div>
+    </div>`;
+}
+async function cargarPedidosDeApi(container, onAddCard) {
+  let raw = [];
+  try { raw = await getPedidos(0, 50); }
+  catch (e) { container.innerHTML = emptyState("No se pudieron cargar los pedidos."); return; }
+
+  const mapped = [];
+  for (const p of raw) { try { mapped.push(fromApi(p)); } catch {} }
+
+  if (!mapped.length) { container.innerHTML = emptyState("No hay pedidos para mostrar."); return; }
+
+  container.innerHTML = "";
+  mapped.forEach(p => { try { onAddCard(p, container); } catch {} });
+}
+
+/* =========================
+   Selección + Totales
+   ========================= */
+function ensureTotalsBlock(sectionEl) {
+  let summary = document.getElementById("order-summary");
+  if (!summary) {
+    summary = document.createElement("div");
+    summary.id = "order-summary";
+    summary.className = "mt-3 text-sm text-gray-700";
+    summary.innerHTML = `
+      <div><strong>Subtotal:</strong> $<span id="summary-subtotal">0.00</span></div>
+      <div><strong>Propina (10%):</strong> $<span id="summary-tip">0.00</span></div>
+      <div><strong>Total:</strong> $<span id="summary-total">0.00</span></div>
+    `;
+    sectionEl.appendChild(summary);
+  }
+  return {
+    subEl: document.getElementById("summary-subtotal"),
+    tipEl: document.getElementById("summary-tip"),
+    totalEl: document.getElementById("summary-total"),
+  };
+}
+function renderSeleccionUI() {
+  const sel = getSeleccion();
+
+  const secSel = document.getElementById("selected-dishes-section") || $("#selected-dishes-section");
+  const listSel = document.getElementById("selected-dishes-list") || $("#selected-dishes-list");
+  const itemCountBadge = document.getElementById("item-count-badge") || $("#item-count-badge");
+
+  if (!secSel || !listSel) return;
+
+  if (!sel.length) {
+    secSel.classList.add("hidden");
+    listSel.innerHTML = "";
+    if (itemCountBadge) itemCountBadge.classList.add("hidden");
+    return;
+  }
+
+  secSel.classList.remove("hidden");
+  if (itemCountBadge) {
+    itemCountBadge.classList.remove("hidden");
+    itemCountBadge.textContent = String(sel.reduce((a, b) => a + (b.qty || 1), 0));
+  }
+
+  listSel.innerHTML = sel.map(it => `
+    <div class="flex items-center justify-between p-2 bg-white border rounded">
+      <div>
+        <div class="text-sm font-medium">${it.nombre}</div>
+        <div class="text-xs text-gray-500">$${Number(it.precio).toFixed(2)}</div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="btn-minus px-2 py-1 bg-gray-200 rounded" data-id="${it.id}">-</button>
+        <span class="w-6 text-center">${it.qty || 1}</span>
+        <button class="btn-plus px-2 py-1 bg-gray-200 rounded" data-id="${it.id}">+</button>
+        <button class="btn-remove px-2 py-1 bg-red-500 text-white rounded" title="Quitar" data-id="${it.id}">
+          <i class="fa fa-trash"></i>
+        </button>
+      </div>
+    </div>
+  `).join("");
+
+  $$(".btn-plus", listSel).forEach(b => b.addEventListener("click", () => {
+    const id = b.getAttribute("data-id");
+    const arr = getSeleccion();
+    const it = arr.find(x => String(x.id) === String(id));
+    if (it) it.qty = (it.qty || 1) + 1;
+    setSeleccion(arr); renderSeleccionUI();
+  }));
+  $$(".btn-minus", listSel).forEach(b => b.addEventListener("click", () => {
+    const id = b.getAttribute("data-id");
+    const arr = getSeleccion();
+    const it = arr.find(x => String(x.id) === String(id));
+    if (it) it.qty = Math.max(1, (it.qty || 1) - 1);
+    setSeleccion(arr); renderSeleccionUI();
+  }));
+  $$(".btn-remove", listSel).forEach(b => b.addEventListener("click", () => {
+    const id = b.getAttribute("data-id");
+    const arr = getSeleccion().filter(x => String(x.id) !== String(id));
+    setSeleccion(arr); renderSeleccionUI();
+  }));
+
+  const TIP_RATE = 0.10;
+  const subtotal = sel.reduce((sum, it) => sum + (Number(it.precio) || 0) * (it.qty || 1), 0);
+  const propina  = +(subtotal * TIP_RATE).toFixed(2);
+  const total    = +(subtotal + propina).toFixed(2);
+
+  const { subEl, tipEl, totalEl } = ensureTotalsBlock(secSel);
+  if (subEl)  subEl.textContent  = subtotal.toFixed(2);
+  if (tipEl)  tipEl.textContent  = propina.toFixed(2);
+  if (totalEl) totalEl.textContent = total.toFixed(2);
+}
+
+/* =========================
+   Payloads + Validación
+   ========================= */
+function buildPayloadsFromSelection() {
+  const seleccion = getSeleccion();
+
+  const nombreCliente  = ($("#customer-name")?.value || "").trim();
+  const idMesa         = parseInt($("#table-select")?.value || "", 10);
+  const idEmpleado     = parseInt($("#waiter-select")?.value || "", 10);
+  let idEstadoPedido   = parseInt($("#status-select")?.value || "", 10);
+  if (!Number.isFinite(idEstadoPedido) && ESTADOS_ORDER[0]?.id) idEstadoPedido = ESTADOS_ORDER[0].id;
+
+  if (!nombreCliente) { markInvalid("customer-name"); showAlert("error","El nombre del cliente es obligatorio"); throw new Error("VALIDATION"); }
+  if (!Number.isFinite(idMesa) || idMesa <= 0) { markInvalid("table-select"); showAlert("error","Selecciona una mesa válida"); throw new Error("VALIDATION"); }
+  if (!Number.isFinite(idEmpleado) || idEmpleado <= 0) { markInvalid("waiter-select"); showAlert("error","Selecciona un mesero válido"); throw new Error("VALIDATION"); }
+  if (!Number.isFinite(idEstadoPedido) || idEstadoPedido <= 0) { markInvalid("status-select"); showAlert("error","Selecciona un estado válido"); throw new Error("VALIDATION"); }
+  if (!Array.isArray(seleccion) || !seleccion.length) { showAlert("info","Agrega al menos un platillo"); throw new Error("VALIDATION"); }
+
+  const d = new Date();
+  const fpedido = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  const observaciones  = ($("#order-notes")?.value || "").trim();
+
+  const payloads = seleccion.map((it, idx) => {
+    const idPlatillo = parseInt(it.id ?? it.idPlatillo, 10);
+    const qty        = Math.max(1, parseInt(it.qty || it.cantidad || "1", 10));
+    const precio     = Number(it.precio) || 0;
+
+    if (!Number.isFinite(idPlatillo) || idPlatillo <= 0) { showAlert("error",`Falta el ID del platillo en la línea ${idx+1}`); throw new Error("VALIDATION"); }
+    if (!Number.isFinite(qty) || qty <= 0) { showAlert("error",`Cantidad inválida para el platillo #${idPlatillo}`); throw new Error("VALIDATION"); }
+    if (!Number.isFinite(precio) || precio <= 0) { showAlert("error",`Precio inválido para el platillo #${idPlatillo}`); throw new Error("VALIDATION"); }
+
+    const subtotal = +(precio * qty).toFixed(2);
+    const propina  = +(subtotal * 0.10).toFixed(2);
+    const total    = +(subtotal + propina).toFixed(2);
+
+    if (subtotal <= 0 || total <= 0) { showAlert("error",`Totales inválidos para el platillo #${idPlatillo}`); throw new Error("VALIDATION"); }
+
+    return {
+      cantidad: qty,
+      subtotal,
+      propina,
+      totalPedido: total,
+      fpedido,
+      observaciones,
+      nombrecliente: nombreCliente,
+      idMesa,
+      idEmpleado,
+      idEstadoPedido,
+      idPlatillo
+    };
+  });
+
+  return payloads;
+}
+
+/* =========================
+   Crear / Actualizar
+   ========================= */
+async function crearPedidoDesdeSeleccion() {
+  const payloads = buildPayloadsFromSelection();
+  for (const p of payloads) await createPedido(p);
+  // ocupar mesa (una vez)
+  const idMesa = payloads[0]?.idMesa;
+  if (idMesa) await ocuparMesa(idMesa);
+}
+async function actualizarPedido(editId) {
+  if (!Number.isFinite(editId)) throw new Error("ID inválido para actualizar.");
+  const payloads = buildPayloadsFromSelection();
+  await updatePedido(editId, payloads[0]);
+}
+
+/* =========================
+   INIT
+   ========================= */
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
-  // refs
   const ordersList      = $("#orders-list");
   const newOrderBtn     = $("#new-order-btn");
   const newOrderForm    = $("#new-order-form");
@@ -219,57 +927,72 @@ async function init() {
   const orderTime       = $("#order-time");
   const saveOrderBtn    = $("#save-order-btn");
   const addDishesBtn    = $("#add-dishes-btn");
-  const waiterSelect    = $("#waiter-select");   // <-- SELECT dinámico
+  const waiterSelect    = $("#waiter-select");
 
   await cargarCatalogos();
   await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
-  await cargarEmpleados(waiterSelect);           // carga el select y el mapa
+  await cargarEmpleados(waiterSelect);
+  await cargarMesasSelect();
 
-  // Abrir form (manual)
   newOrderBtn?.addEventListener("click", () => {
+    editingId = null;
+    clearSnapshots();
+    resetOrderForm();                 // <<--- LIMPIAR TODO
     newOrderForm.classList.remove("hidden");
     ordersList.classList.add("hidden");
     newOrderBtn.classList.add("hidden");
     orderTime.value = new Date().toLocaleDateString("es-ES");
-    restoreFormSnapshot();
-    restoreWaiter(waiterSelect);
-    renderSeleccionUI();
+    // limpiar hash si quedó de una navegación previa
+    if (location.hash === "#new") history.replaceState({}, "", location.pathname);
   });
 
-  // Cancelar = limpiar todo
   backToOrdersBtn?.addEventListener("click", () => {
     newOrderForm.classList.add("hidden");
     ordersList.classList.remove("hidden");
     newOrderBtn.classList.remove("hidden");
-
-    ($("#customer-name") || {}).value = "";
-    ($("#table-select")  || {}).value = "";
-    ($("#order-notes")   || {}).value = "";
-    if (waiterSelect) waiterSelect.value = "";
-
-    sessionStorage.removeItem(K_SEL);
-    sessionStorage.removeItem(K_OPEN_FORM);
-    sessionStorage.removeItem(K_WAITER);
-    localStorage.removeItem(K_CLIENTE);
-    localStorage.removeItem(K_MESA);
-    renderSeleccionUI();
+    setSeleccion([]); renderSeleccionUI();
+    editingId = null;
+    if (saveOrderBtn) saveOrderBtn.textContent = "Guardar pedido";
   });
 
-  // Ir al Menú y volver al FORM
   addDishesBtn?.addEventListener("click", () => {
     saveFormSnapshot();
-    sessionStorage.setItem(K_OPEN_FORM, "1"); // al volver, abrir form
+    sessionStorage.setItem(K_OPEN_FORM, "1");
     const back = (location.pathname.split("/").pop() || "orders.html") + "#new";
     window.location.href = `menu.html?select=1&back=${encodeURIComponent(back)}`;
   });
 
-  // Guardar pedido
   saveOrderBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
-    await guardarPedidoDesdeSeleccion();
+    try {
+      if (!ESTADOS_ORDER.length) await cargarEstadosYSelect();
+
+      if (editingId == null) {
+        await crearPedidoDesdeSeleccion();
+        showAlert("success", "Se agregó el pedido correctamente");
+      } else {
+        await actualizarPedido(editingId);
+        showAlert("success", "Se actualizó el pedido correctamente");
+        editingId = null;
+      }
+
+      resetOrderForm(); // dejar listo para un alta nueva
+
+      newOrderForm.classList.add("hidden");
+      ordersList.classList.remove("hidden");
+      newOrderBtn.classList.remove("hidden");
+
+      ordersList.innerHTML = "";
+      await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
+      await cargarMesasSelect(); // refrescar disponibilidad
+    } catch (err) {
+      if (err && err.message !== "VALIDATION") {
+        showAlert("error", err.message || "No se pudo guardar el pedido");
+      }
+      console.error(err);
+    }
   });
 
-  // Si venimos del menú con selección, abre el formulario
   if (sessionStorage.getItem(K_OPEN_FORM) === "1" || location.hash === "#new") {
     newOrderForm.classList.remove("hidden");
     ordersList.classList.add("hidden");
@@ -278,277 +1001,10 @@ async function init() {
     restoreFormSnapshot();
     restoreWaiter(waiterSelect);
     renderSeleccionUI();
+    sessionStorage.removeItem(K_OPEN_FORM);
   } else {
     renderSeleccionUI();
   }
-}
 
-/* --------- Catálogos --------- */
-async function cargarCatalogos() {
-  // Estados
-  const rawEstados = await getEstadosPedido().catch(() => []);
-  if (rawEstados.length) {
-    MAP_ESTADOS = new Map(
-      rawEstados.map((e) => {
-        const id = Number(e.id ?? e.idEstadoPedido ?? e.ID ?? e.Id);
-        const nombre = (e.nomEstadoPedido ?? e.nombre ?? e.estado ?? "").toString().toLowerCase();
-        return [id, { id, nombre }];
-      })
-    );
-  } else {
-    MAP_ESTADOS = new Map(FALLBACK_ESTADOS.map((e) => [e.id, e]));
-  }
-
-  // Platillos
-  const plats = await getPlatillos(0).catch(() => []);
-  MAP_PLATILLOS = new Map(
-    plats.map((p) => [Number(p.id), { id: Number(p.id), nomPlatillo: p.nombre, precio: Number(p.precio || 0) }])
-  );
-}
-
-/* --------- Empleados --------- */
-async function cargarEmpleados(waiterSelect) {
-  if (!waiterSelect) return;
-  waiterSelect.innerHTML = `<option value="">Seleccione un mesero</option>`;
-
-  try {
-    const lista = await getEmpleados(0);
-    if (lista.length) {
-      MAP_EMPLEADOS = new Map(lista.map((e) => [e.id, e]));
-      lista.forEach((e) => {
-        const opt = document.createElement("option");
-        opt.value = String(e.id);
-        opt.textContent = e.nombre;
-        waiterSelect.appendChild(opt);
-      });
-    }
-  } catch (e) {
-    console.warn("No se pudieron cargar empleados:", e);
-  }
-
-  // Restaura selección previa si existe
-  const saved = sessionStorage.getItem(K_WAITER);
-  if (saved && waiterSelect.querySelector(`option[value="${saved}"]`)) {
-    waiterSelect.value = saved;
-  }
-
-  waiterSelect.addEventListener("change", () => {
-    sessionStorage.setItem(K_WAITER, waiterSelect.value || "");
-  });
-}
-
-/* --------- GET y tarjetas --------- */
-async function cargarPedidosDeApi(ordersList, onAddCard) {
-  ordersList.innerHTML = "";
-  const lista = await getPedidos(0, 50);
-  if (!lista.length) {
-    ordersList.innerHTML = `<div class="text-sm text-gray-500 text-center py-4">No hay pedidos.</div>`;
-    return;
-  }
-  lista
-    .slice()
-    .sort((a, b) => Number(b.id) - Number(a.id))
-    .map(fromApi)
-    .forEach((p) => onAddCard(p, ordersList));
-}
-
-function agregarTarjetaPedido(pedido, container) {
-  const card = document.createElement("div");
-  card.className =
-    "tarjeta-animada border border-gray-200 rounded-xl p-4 bg-white shadow-sm transition";
-
-  const listaPlatillos = pedido.Platillos
-    .map((x) => `<li>${x.nombre} (x${x.cantidad})</li>`)
-    .join("");
-
-  const total    = pedido._total;
-  const subtotal = pedido._subtotal;
-  const propina  = pedido._propina;
-  const colorClass = PEDIDO_STATUS_COLORS[pedido.Estado] || "bg-gray-100 text-gray-700";
-
-  card.innerHTML = `
-    <div class="flex justify-between items-start">
-      <h2 class="font-bold text-lg">Pedido de ${pedido.Cliente}</h2>
-      <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${colorClass}">
-        ${pedido.Estado}
-      </span>
-    </div>
-
-    <p><strong>Mesa:</strong> ${pedido.Mesa}</p>
-    <p><strong>Mesero:</strong> ${pedido.Mesero}</p>
-    <p><strong>Fecha:</strong> ${pedido.Hora}</p>
-
-    <p class="mt-2"><strong>Platillos:</strong></p>
-    <ul class="list-disc pl-5 text-sm mb-2">
-      ${listaPlatillos}
-    </ul>
-
-    <div class="text-right text-sm mb-3">
-      <div>Subtotal: <strong>$${subtotal.toFixed(2)}</strong></div>
-      <div>Propina: <strong>$${propina.toFixed(2)}</strong></div>
-      <div>Total: <strong>$${total.toFixed(2)}</strong></div>
-    </div>
-
-    <div class="flex justify-start">
-      <button class="btn-eliminar bg-red-500 text-white px-3 py-1 rounded text-sm font-medium" data-id="${pedido.id}">
-        Eliminar
-      </button>
-    </div>
-  `;
-
-  card.querySelector(".btn-eliminar").addEventListener("click", async (e) => {
-    const id = Number(e.currentTarget.dataset.id);
-    try {
-      await deletePedido(id);
-      card.remove();
-    } catch (err) {
-      console.error("Error eliminando pedido:", err);
-      alert("No se pudo eliminar el pedido.");
-    }
-  });
-
-  container.prepend(card);
-}
-
-/* --------- SELECCIÓN proveniente del Menú --------- */
-function renderSeleccionUI() {
-  const sel = getSeleccion();
-
-  const badge = $("#items-count");
-  const sumBox = $("#dishes-summary");
-  const secSel = $("#selected-dishes-section");
-  const listSel= $("#selected-dishes-list");
-
-  // Badge
-  const items = sel.reduce((acc, x) => acc + (x.qty || 1), 0);
-  if (badge) {
-    if (items > 0) {
-      badge.textContent = `${items} item${items !== 1 ? "s" : ""}`;
-      badge.classList.remove("hidden");
-    } else {
-      badge.classList.add("hidden");
-    }
-  }
-
-  // Resumen + totales
-  if (sumBox) {
-    if (!sel.length) {
-      sumBox.innerHTML = `<div class="text-gray-500 text-sm">No hay platillos seleccionados.</div>`;
-    } else {
-      sumBox.innerHTML = sel.map(it =>
-        `<div class="flex justify-between text-sm">
-          <span>${it.nombre}</span>
-          <span>$${Number(it.precio).toFixed(2)} × ${it.qty || 1}</span>
-        </div>`
-      ).join("");
-      const subtotal = sel.reduce((a, x) => a + Number(x.precio) * (x.qty || 1), 0);
-      const propina  = Math.round(subtotal * 0.10 * 100) / 100;
-      const total    = Math.round((subtotal + propina) * 100) / 100;
-      sumBox.innerHTML += `
-        <hr class="my-2">
-        <div class="text-right text-sm">
-          <div>Subtotal: <strong>$${subtotal.toFixed(2)}</strong></div>
-          <div>Propina (10%): <strong>$${propina.toFixed(2)}</strong></div>
-          <div>Total: <strong>$${total.toFixed(2)}</strong></div>
-        </div>`;
-    }
-  }
-
-  // Lista detallada con +/- y 🗑
-  if (secSel && listSel) {
-    if (!sel.length) {
-      secSel.classList.add("hidden");
-      listSel.innerHTML = "";
-    } else {
-      secSel.classList.remove("hidden");
-      listSel.innerHTML = sel.map(it => `
-        <div class="flex items-center justify-between p-2 bg-white border rounded">
-          <div>
-            <div class="text-sm font-medium">${it.nombre}</div>
-            <div class="text-xs text-gray-500">$${Number(it.precio).toFixed(2)}</div>
-          </div>
-          <div class="flex items-center gap-2">
-            <button class="btn-minus px-2 py-1 bg-gray-200 rounded" data-id="${it.id}">-</button>
-            <span class="w-6 text-center">${it.qty || 1}</span>
-            <button class="btn-plus px-2 py-1 bg-gray-200 rounded" data-id="${it.id}">+</button>
-            <button class="btn-remove px-2 py-1 bg-red-500 text-white rounded" title="Quitar" data-id="${it.id}">
-              <i class="fa fa-trash"></i>
-            </button>
-          </div>
-        </div>
-      `).join("");
-
-      // +
-      $$(".btn-plus", listSel).forEach(b => b.addEventListener("click", () => {
-        const id = b.getAttribute("data-id");
-        const arr = getSeleccion();
-        const it = arr.find(x => String(x.id) === String(id));
-        if (it) it.qty = (it.qty || 1) + 1;
-        setSeleccion(arr);
-        renderSeleccionUI();
-      }));
-
-      // -
-      $$(".btn-minus", listSel).forEach(b => b.addEventListener("click", () => {
-        const id = b.getAttribute("data-id");
-        const arr = getSeleccion();
-        const it = arr.find(x => String(x.id) === String(id));
-        if (it) it.qty = Math.max(1, (it.qty || 1) - 1);
-        setSeleccion(arr);
-        renderSeleccionUI();
-      }));
-
-      // 🗑
-      $$(".btn-remove", listSel).forEach(b => b.addEventListener("click", () => {
-        const id = b.getAttribute("data-id");
-        const arr = getSeleccion().filter(x => String(x.id) !== String(id));
-        setSeleccion(arr);
-        renderSeleccionUI();
-      }));
-    }
-  }
-}
-
-/* --------- Guardar Pedido (POST múltiple, 1 por platillo) --------- */
-function nowParts() {
-  const d = new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  const mm = pad(d.getMonth() + 1);
-  const dd = pad(d.getDate());
-  const HH = pad(d.getHours());
-  const MM = pad(d.getMinutes());
-  return { fecha: `${yyyy}-${mm}-${dd}`, hora: `${HH}:${MM}` };
-}
-
-// Construir payloads exactos
-const payloads = seleccion.map(it => {
-  const qty = Math.max(1, parseInt(it.qty || "1", 10));
-  const precio = Number(it.precio) || 0;
-  const subtotal = Number((precio * qty).toFixed(2));
-  const propina  = Number((subtotal * 0.10).toFixed(2));
-  const total    = Number((subtotal + propina).toFixed(2));
-  
-  return {
-    cantidad: qty,
-    totalPedido: total,
-    subtotal: subtotal,
-    propina: propina,
-    fpedido: fecha,
-    observaciones: (observaciones && observaciones.trim() !== "") ? observaciones : "Sin observaciones",
-    nombrecliente: nombrecliente,
-    idMesa: idMesa,
-    idEmpleado: idEmpleado,
-    idEstadoPedido: idEstadoPedido,
-    idPlatillo: parseInt(it.id, 10)
-  };
-});
-
-/* --------- Helpers mesero --------- */
-function restoreWaiter(waiterSelect) {
-  if (!waiterSelect) return;
-  const saved = sessionStorage.getItem(K_WAITER);
-  if (saved && waiterSelect.querySelector(`option[value="${saved}"]`)) {
-    waiterSelect.value = saved;
-  }
+  applyModernSkin();
 }

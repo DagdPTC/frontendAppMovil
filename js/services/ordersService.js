@@ -1,7 +1,13 @@
+// js/services/ordersService.js
 import { API } from "./apiConfig.js";
 
-const BASE = (API && API.pedido) ? API.pedido.replace(/\/+$/, "") : "http://localhost:8080/apiPedido";
-const BASE_EST = (API && API.estadoPedido) ? API.estadoPedido.replace(/\/+$/, "") : null;
+const BASE_P  = API?.pedido       ? API.pedido.replace(/\/+$/, "")       : "http://localhost:8080/apiPedido";
+const BASE_M  = API?.mesa         ? API.mesa.replace(/\/+$/, "")         : null;
+const BASE_E  = API?.empleado     ? API.empleado.replace(/\/+$/, "")     : null;
+
+// Descubrir base de EstadoPedido si no está definido en apiConfig
+let BASE_EST = API?.estadoPedido ? API.estadoPedido.replace(/\/+$/, "") : null;
+if (!BASE_EST && BASE_P) BASE_EST = BASE_P.replace(/\/apiPedido$/i, "/apiEstadoPedido");
 
 function pickArray(payload) {
   if (!payload) return [];
@@ -10,7 +16,6 @@ function pickArray(payload) {
   return [];
 }
 
-// En ordersService.js, modifica fetchJSON para mostrar errores de validación:
 async function fetchJSON(url, options = {}) {
   try {
     const res = await fetch(url, {
@@ -20,119 +25,125 @@ async function fetchJSON(url, options = {}) {
         ...(options.headers || {}),
       },
       cache: "no-cache",
-      ...options,
+      method: options.method || "GET",
+      body: options.body || undefined,
     });
-    
-    const text = await res.text().catch(() => "");
-    
+
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+
     if (!res.ok) {
-      let errorData;
-      try {
-        errorData = JSON.parse(text);
-      } catch {
-        errorData = { message: text };
-      }
-      
-      const error = new Error(`HTTP ${res.status}: ${errorData.message || res.statusText}`);
-      error.status = res.status;
-      error.details = errorData;
-      
-      console.error(`[API Error] ${url}:`, errorData);
-      throw error;
+      const msg = (data && (data.message || data.error || data.errors)) || text || `HTTP ${res.status}`;
+      console.error("[API ERROR]", url, msg);
+      throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
     }
-    
-    return text ? JSON.parse(text) : null;
-  } catch (error) {
-    console.error(`[Fetch Error] ${url}:`, error);
-    throw error;
+    return data;
+  } catch (err) {
+    console.error("[FETCH FAIL]", url, err);
+    throw err;
   }
 }
 
-/** GET /apiPedido/getDataPedido  */
-export async function getPedidos(page = 0, size = 200) {
-  const sizes = [size, 100, 50, 20, 10, 5, null];
+// ---------- Pedidos ----------
+export async function getPedidos(page = 0, size = 50) {
+  const url = `${BASE_P}/getDataPedido?page=${encodeURIComponent(page)}&size=${encodeURIComponent(size)}`;
+  const data = await fetchJSON(url);
+  const arr = pickArray(data);
+  console.log("[Pedidos]", arr.length, "items via", url);
+  return arr;
+}
+
+export async function createPedido(dto) {
+  // EXACTAMENTE como tu backend lo espera (camelCase)
+  const payload = {
+    nombrecliente: String(dto.nombrecliente || dto.nombreCliente || ""),
+    propina: Number(dto.propina),
+    observaciones: (dto.observaciones?.trim() || "Sin observaciones"),
+    fpedido: String(dto.fpedido),               // "YYYY-MM-DD"
+    cantidad: Number(dto.cantidad),
+    subtotal: Number(dto.subtotal),
+    totalPedido: Number(dto.totalPedido),
+    idEmpleado: Number(dto.idEmpleado),
+    idMesa: Number(dto.idMesa),
+    idEstadoPedido: Number(dto.idEstadoPedido),
+    idPlatillo: Number(dto.idPlatillo),
+  };
+
+  console.log("[POST] /apiPedido/createPedido payload:", payload);
+  return fetchJSON(`${BASE_P}/createPedido`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export async function updatePedido(id, dto) {
+  // mismo shape camelCase
+  const payload = {
+    nombrecliente: String(dto.nombrecliente || dto.nombreCliente || ""),
+    propina: Number(dto.propina),
+    observaciones: (dto.observaciones?.trim() || "Sin observaciones"),
+    fpedido: String(dto.fpedido),               // "YYYY-MM-DD"
+    cantidad: Number(dto.cantidad),
+    subtotal: Number(dto.subtotal),
+    totalPedido: Number(dto.totalPedido),
+    idEmpleado: Number(dto.idEmpleado),
+    idMesa: Number(dto.idMesa),
+    idEstadoPedido: Number(dto.idEstadoPedido),
+    idPlatillo: Number(dto.idPlatillo),
+  };
+
+  console.log("[PUT] /apiPedido/modificarPedido/%s payload:", id, payload);
+  return fetchJSON(`${BASE_P}/modificarPedido/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(payload) });
+}
+
+export async function deletePedido(id) {
+  return fetchJSON(`${BASE_P}/eliminarPedido/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+// ---------- Catálogos ----------
+export async function getEstadosPedido() {
+  if (!BASE_EST) return [];
+  const urls = [
+    `${BASE_EST}/getDataEstadoPedido?page=0&size=200`,
+    `${BASE_EST}/getDataEstadoPedido`,
+  ];
+  for (const url of urls) {
+    const data = await fetchJSON(url).catch(() => null);
+    if (!data) continue;
+    const arr = pickArray(data);
+    if (arr.length) {
+      console.log("[EstadosPedido]", arr.length, "via", url);
+      return arr;
+    }
+  }
+  console.warn("[EstadosPedido] vacío – revisa apiConfig.js");
+  return [];
+}
+
+export async function getEmpleados(page = 0) {
+  if (!BASE_E) return [];
+  const sizes = [200, 100, 50, null];
   for (const s of sizes) {
-    const url = s == null
-      ? `${BASE}/getDataPedido?page=${page}`
-      : `${BASE}/getDataPedido?page=${page}&size=${s}`;
-    try {
-      const data = await fetchJSON(url);
-      const arr = pickArray(data);
-      if (arr.length) {
-        console.info(`[Pedidos] ${arr.length} items via ${url}`);
-        return arr;
-      }
-    } catch (e) {
-      console.warn(`[Pedidos] intento fallido en ${url}:`, e.message);
+    const url = s == null ? `${BASE_E}/getDataEmpleado?page=${page}`
+                          : `${BASE_E}/getDataEmpleado?page=${page}&size=${s}`;
+    const data = await fetchJSON(url).catch(() => null);
+    if (data) {
+      return pickArray(data).map(e => {
+        const id = Number(e.id ?? e.Id ?? e.idEmpleado ?? e.IDEMPLEADO ?? e.ID);
+        const nombre = String(e.nombre ?? e.Nombre ?? e.nom ?? `Empleado ${id}`).trim();
+        return { id, nombre };
+      });
     }
   }
   return [];
 }
 
-/** (opcional) estados */
-export async function getEstadosPedido(page = 0, size = 200) {
-  if (!BASE_EST) return [];
-  const url = `${BASE_EST}/getDataEstadoPedido?page=${page}&size=${size}`;
-  try {
-    const data = await fetchJSON(url);
-    return pickArray(data);
-  } catch {
-    return [];
+export async function getMesasForOrders(page = 0) {
+  if (!BASE_M) return [];
+  const sizes = [200, 100, 50, null];
+  for (const s of sizes) {
+    const url = s == null ? `${BASE_M}/getDataMesa?page=${page}`
+                          : `${BASE_M}/getDataMesa?page=${page}&size=${s}`;
+    const data = await fetchJSON(url).catch(() => null);
+    if (data) return pickArray(data);
   }
-}
-
-/* --------------------- AQUI LO IMPORTANTE --------------------- */
-/* Probar varias “formas” de payload. */
-async function tryPost(bodyVariant, label) {
-  console.log(`[POST createPedido] probando formato: ${label}`, bodyVariant);
-  return fetchJSON(`${BASE}/createPedido`, {
-    method: "POST",
-    body: JSON.stringify(bodyVariant),
-  });
-}
-
-/** POST /apiPedido/createPedido con el formato exacto del DTO */
-export async function createPedido(data) {
-  // Asegurar que Observaciones nunca esté vacío o nulo
-  const observaciones = data.observaciones && data.observaciones.trim() !== "" 
-    ? data.observaciones 
-    : "Sin observaciones";
-
-  // Formato exacto que coincide con PedidoDTO
-  const payload = {
-    Cantidad: Number(data.cantidad), // Esto se convertirá a Long en el backend
-    TotalPedido: Number(data.totalPedido),
-    Subtotal: Number(data.subtotal),
-    Propina: Number(data.propina),
-    FPedido: String(data.fpedido),
-    Observaciones: observaciones,
-    Nombrecliente: String(data.nombrecliente || data.nombreCliente || ""),
-    IdMesa: Number(data.idMesa),
-    IdEmpleado: Number(data.idEmpleado),
-    IdEstadoPedido: Number(data.idEstadoPedido),
-    IdPlatillo: Number(data.idPlatillo)
-  };
-
-  console.log('[POST] Payload para DTO:', payload);
-  
-  return fetchJSON(`${BASE}/createPedido`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-/* -------------------------------------------------------------- */
-
-/** PUT /apiPedido/modificarPedido/{id} */
-export async function updatePedido(id, data) {
-  return fetchJSON(`${BASE}/modificarPedido/${encodeURIComponent(id)}`, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
-}
-
-/** DELETE /apiPedido/eliminarPedido/{id} */
-export async function deletePedido(id) {
-  return fetchJSON(`${BASE}/eliminarPedido/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-  });
+  return [];
 }
