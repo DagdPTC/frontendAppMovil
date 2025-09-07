@@ -50,6 +50,7 @@ function showSkeleton() {
     <div class="grid grid-cols-2 gap-4 w-full">
       ${Array.from({length: 6}).map(() => `
         <div class="animate-pulse bg-white border border-gray-200 rounded-lg p-3 space-y-2">
+          <div class="h-20 bg-gray-200 rounded w-full"></div>
           <div class="h-4 bg-gray-200 rounded w-3/4"></div>
           <div class="h-3 bg-gray-200 rounded w-5/6"></div>
           <div class="h-4 bg-gray-200 rounded w-1/3"></div>
@@ -108,7 +109,7 @@ function onSearch(e) {
   });
 }
 
-/* ---------- Render (SIN imágenes) + metadatos para modo selección ---------- */
+/* ---------- Render con imágenes ---------- */
 function renderDishes(items) {
   const cont = $("#dishes-container");
   if (!cont) return;
@@ -125,20 +126,26 @@ function renderDishes(items) {
     const catSlug = cat?.slug || slugify(catName);
 
     const card = document.createElement("div");
-    card.className = "dish-card bg-white border border-gray-200 rounded-lg p-3";
+    card.className = "dish-card bg-white border border-gray-200 rounded-lg p-3 flex flex-col";
     card.dataset.category = catSlug;
 
-    // === Metadatos para el controller de selección (no cambian el diseño) ===
+    // Metadatos para selección
     card.classList.add("menu-item");
     card.dataset.id      = String(p.id);
     card.dataset.nombre  = p.nombre;
     card.dataset.precio  = String(p.precio);
 
+    // === Imagen ===
+    const img = document.createElement("img");
+    img.className = "w-full h-32 object-cover rounded-md mb-2";
+    img.src = p.imagenUrl || "https://via.placeholder.com/150?text=Sin+Imagen";
+    img.alt = p.nombre;
+
     const header = document.createElement("div");
     header.className = "flex items-start justify-between";
 
     const title = document.createElement("h3");
-    title.className = "font-bold";
+    title.className = "font-bold text-sm";
     title.textContent = p.nombre;
 
     const badge = document.createElement("span");
@@ -154,7 +161,7 @@ function renderDishes(items) {
     price.textContent = toMoney(p.precio);
 
     header.append(title, badge);
-    card.append(header, desc, price);
+    card.append(img, header, desc, price);
     cont.appendChild(card);
   });
 }
