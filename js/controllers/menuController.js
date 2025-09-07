@@ -1,24 +1,28 @@
 // js/controllers/menuController.js
 import { getCategorias, getPlatillos } from "../services/menuService.js";
 
-const $  = s => document.querySelector(s);
-const $$ = s => Array.from(document.querySelectorAll(s));
-const toMoney = n => `$${Number(n || 0).toFixed(2)}`;
+const $  = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
+const toMoney = (n) => `$${Number(n || 0).toFixed(2)}`;
 
-const slugify = s => String(s || "")
-  .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-  .toLowerCase().replace(/\s+/g, " ").trim();
+const slugify = (s) =>
+  String(s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
 
-const badgeClass = name => {
+const badgeClass = (name) => {
   const c = slugify(name);
-  if (c.includes("bebida"))  return "bg-sky-100 text-sky-700";
-  if (c.includes("postre"))  return "bg-pink-100 text-pink-700";
-  if (c.includes("plato"))   return "bg-emerald-100 text-emerald-700";
+  if (c.includes("bebida")) return "bg-sky-100 text-sky-700";
+  if (c.includes("postre")) return "bg-pink-100 text-pink-700";
+  if (c.includes("plato")) return "bg-emerald-100 text-emerald-700";
   if (c.includes("entrada")) return "bg-amber-100 text-amber-700";
   return "bg-gray-100 text-gray-700";
 };
 
-let CATEGORIAS = [];        // [{id, nombre, slug}]
+let CATEGORIAS = []; // [{id, nombre, slug}]
 let PLATILLOS = [];
 let CAT_BY_ID = new Map();
 
@@ -33,10 +37,14 @@ async function init() {
   showSkeleton();
 
   // 1) Cargar platillos y categorías
-  const [dishes, cats] = await Promise.all([getPlatillos(0), getCategorias(0)]);
-  PLATILLOS  = dishes;
-  CATEGORIAS = cats.map(c => ({ ...c, slug: slugify(c.nombre) }));
-  CAT_BY_ID  = new Map(CATEGORIAS.map(c => [c.id, c]));
+  const [dishes, cats] = await Promise.all([
+    getPlatillos(0), // ahora retorna array
+    getCategorias(0),
+  ]);
+
+  PLATILLOS = dishes;
+  CATEGORIAS = cats.map((c) => ({ ...c, slug: slugify(c.nombre) }));
+  CAT_BY_ID = new Map(CATEGORIAS.map((c) => [c.id, c]));
 
   buildCategoryButtons();
   renderDishes(PLATILLOS);
@@ -48,14 +56,18 @@ function showSkeleton() {
   if (!cont) return;
   cont.innerHTML = `
     <div class="grid grid-cols-2 gap-4 w-full">
-      ${Array.from({length: 6}).map(() => `
+      ${Array.from({ length: 6 })
+        .map(
+          () => `
         <div class="animate-pulse bg-white border border-gray-200 rounded-lg p-3 space-y-2">
           <div class="h-20 bg-gray-200 rounded w-full"></div>
           <div class="h-4 bg-gray-200 rounded w-3/4"></div>
           <div class="h-3 bg-gray-200 rounded w-5/6"></div>
           <div class="h-4 bg-gray-200 rounded w-1/3"></div>
         </div>
-      `).join("")}
+      `
+        )
+        .join("")}
     </div>
   `;
 }
@@ -69,22 +81,28 @@ function buildCategoryButtons() {
   const btnAll = makeCatBtn("Todos", "all", true);
   wrap.appendChild(btnAll);
 
-  CATEGORIAS.forEach(c => {
+  CATEGORIAS.forEach((c) => {
     wrap.appendChild(makeCatBtn(c.nombre, c.slug, false));
   });
 }
 
 function makeCatBtn(label, value, active) {
   const btn = document.createElement("button");
-  btn.className = `category-btn ${active ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-600"} px-3 py-1 rounded-full text-sm font-medium`;
+  btn.className = `category-btn ${
+    active ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-600"
+  } px-3 py-1 rounded-full text-sm font-medium`;
   btn.dataset.category = value;
   btn.textContent = label;
 
   btn.addEventListener("click", () => {
-    $$(".category-btn").forEach(b => b.classList.remove("bg-blue-100","text-blue-600"));
-    $$(".category-btn").forEach(b => b.classList.add("bg-gray-100","text-gray-600"));
-    btn.classList.remove("bg-gray-100","text-gray-600");
-    btn.classList.add("bg-blue-100","text-blue-600");
+    $$(".category-btn").forEach((b) =>
+      b.classList.remove("bg-blue-100", "text-blue-600")
+    );
+    $$(".category-btn").forEach((b) =>
+      b.classList.add("bg-gray-100", "text-gray-600")
+    );
+    btn.classList.remove("bg-gray-100", "text-gray-600");
+    btn.classList.add("bg-blue-100", "text-blue-600");
     applyCategoryFilter(value);
   });
 
@@ -93,19 +111,25 @@ function makeCatBtn(label, value, active) {
 
 function applyCategoryFilter(slug) {
   const chosen = String(slug || "all");
-  $$("#dishes-container .dish-card").forEach(card => {
+  $$("#dishes-container .dish-card").forEach((card) => {
     const dishCat = card.dataset.category || "all";
-    card.classList.toggle("hidden", !(chosen === "all" || dishCat === chosen));
+    card.classList.toggle(
+      "hidden",
+      !(chosen === "all" || dishCat === chosen)
+    );
   });
 }
 
 /* ---------- Búsqueda ---------- */
 function onSearch(e) {
   const term = (e.target.value || "").toLowerCase();
-  $$("#dishes-container .dish-card").forEach(dish => {
+  $$("#dishes-container .dish-card").forEach((dish) => {
     const name = (dish.querySelector("h3")?.textContent || "").toLowerCase();
     const description = (dish.querySelector("p")?.textContent || "").toLowerCase();
-    dish.classList.toggle("hidden", !(name.includes(term) || description.includes(term)));
+    dish.classList.toggle(
+      "hidden",
+      !(name.includes(term) || description.includes(term))
+    );
   });
 }
 
@@ -120,26 +144,30 @@ function renderDishes(items) {
     return;
   }
 
-  items.forEach(p => {
+  items.forEach((p) => {
     const cat = CAT_BY_ID.get(Number(p.idCategoria));
     const catName = cat?.nombre || "Otros";
     const catSlug = cat?.slug || slugify(catName);
 
     const card = document.createElement("div");
-    card.className = "dish-card bg-white border border-gray-200 rounded-lg p-3 flex flex-col";
+    card.className =
+      "dish-card bg-white border border-gray-200 rounded-lg p-3 flex flex-col";
     card.dataset.category = catSlug;
 
     // Metadatos para selección
     card.classList.add("menu-item");
-    card.dataset.id      = String(p.id);
-    card.dataset.nombre  = p.nombre;
-    card.dataset.precio  = String(p.precio);
+    card.dataset.id = String(p.id);
+    card.dataset.nombre = p.nombre;
+    card.dataset.precio = String(p.precio);
 
     // === Imagen ===
     const img = document.createElement("img");
     img.className = "w-full h-32 object-cover rounded-md mb-2";
-    img.src = p.imagenUrl || "https://via.placeholder.com/150?text=Sin+Imagen";
+    img.src = p.imagenUrl || "img/no-image.png";
     img.alt = p.nombre;
+    img.onerror = () => {
+      img.src = "img/no-image.png";
+    };
 
     const header = document.createElement("div");
     header.className = "flex items-start justify-between";
@@ -149,7 +177,9 @@ function renderDishes(items) {
     title.textContent = p.nombre;
 
     const badge = document.createElement("span");
-    badge.className = `text-[11px] px-2 py-0.5 rounded-full font-medium ${badgeClass(catName)}`;
+    badge.className = `text-[11px] px-2 py-0.5 rounded-full font-medium ${badgeClass(
+      catName
+    )}`;
     badge.textContent = catName;
 
     const desc = document.createElement("p");
@@ -167,5 +197,7 @@ function renderDishes(items) {
 }
 
 function animateCards() {
-  $$("#dishes-container .dish-card").forEach(d => d.classList.add("platillo-animado"));
+  $$("#dishes-container .dish-card").forEach((d) =>
+    d.classList.add("platillo-animado")
+  );
 }
