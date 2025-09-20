@@ -1,10 +1,11 @@
 // js/controllers/mesasController.js
-import { getMesasForOrders } from "../services/ordersService.js";
+import { getMesas, getEstadosMesa, patchEstadoMesa } from "../services/mesaService.js";
 
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-const API_HOST = "http://localhost:8080"; // ajusta si usas otro host
+const API_HOST = "http://localhost:8080"; // ajusta si usas otro host/base
+const MAX_SIZE = 50;
 
 /* ===========================================================
    ALERTAS (sin emojis)
@@ -41,7 +42,7 @@ function showAlert(type = "info", text = "", { timeout = 3500 } = {}) {
 }
 
 /* ===========================================================
-   MODALES bonitos
+   MODALES / CONFIRM
    =========================================================== */
 function showConfirm({ title = "Confirmar", message = "", confirmText = "Aceptar", cancelText = "Cancelar", variant = "default" } = {}) {
   return new Promise((resolve) => {
@@ -75,223 +76,15 @@ function showConfirm({ title = "Confirmar", message = "", confirmText = "Aceptar
 }
 
 /* ===========================================================
-   FANCY SELECT (mismo de Pedidos: chips + búsqueda + animación)
+   Utils estado
    =========================================================== */
-function upgradeSelect(nativeSelect, opts = {}) {
-  if (!nativeSelect || nativeSelect._fancy) return;
-  const multiple = nativeSelect.hasAttribute("multiple") || !!opts.multiple;
-  const placeholder = opts.placeholder || "Seleccione…";
-
-  const wrapper = document.createElement("div");
-  wrapper.className = "fancy-select relative w-full";
-  nativeSelect.insertAdjacentElement("afterend", wrapper);
-
-  nativeSelect.classList.add("sr-only");
-  nativeSelect.setAttribute("tabindex", "-1");
-  nativeSelect.style.position = "absolute";
-  nativeSelect.style.left = "-99999px";
-
-  const control = document.createElement("button");
-  control.type = "button";
-  control.className = [
-    "fs-control w-full rounded-xl border border-gray-300 bg-white px-3 py-2",
-    "flex items-center flex-wrap gap-2 text-sm md:text-base",
-    "shadow-sm hover:shadow transition focus:outline-none focus:ring-2 focus:ring-blue-500"
-  ].join(" ");
-
-  const chips = document.createElement("div");
-  chips.className = "fs-chips flex items-center gap-1 flex-1 min-w-0";
-  const ph = document.createElement("span");
-  ph.className = "fs-placeholder text-gray-400 truncate";
-  ph.textContent = placeholder;
-  chips.appendChild(ph);
-
-  const caret = document.createElement("span");
-  caret.className = "ml-auto transition-transform";
-  caret.innerHTML = "▾";
-
-  control.append(chips, caret);
-  wrapper.appendChild(control);
-
-  const panel = document.createElement("div");
-  panel.className = [
-    "fs-panel absolute left-0 right-0 top-[calc(100%+6px)] z-50",
-    "origin-top rounded-xl border border-gray-200 bg-white shadow-lg p-2",
-    "opacity-0 scale-95 pointer-events-none transition-all"
-  ].join(" ");
-
-  const searchWrap = document.createElement("div");
-  searchWrap.className = "mb-2";
-  const search = document.createElement("input");
-  search.type = "text";
-  search.placeholder = "Buscar…";
-  search.className = "w-full rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
-  searchWrap.appendChild(search);
-  panel.appendChild(searchWrap);
-
-  const list = document.createElement("div");
-  list.className = "max-h-64 overflow-auto space-y-1";
-  panel.appendChild(list);
-
-  wrapper.appendChild(panel);
-
-  function readOptions() {
-    return Array.from(nativeSelect.options).map(o => ({
-      value: o.value, label: o.textContent.trim(), disabled: o.disabled, selected: o.selected
-    }));
-  }
-  function renderList(filter = "") {
-    const q = filter.trim().toLowerCase();
-    list.innerHTML = "";
-    readOptions().forEach(opt => {
-      if (q && !opt.label.toLowerCase().includes(q)) return;
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = [
-        "w-full text-left px-3 py-2 rounded-lg",
-        opt.disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-50",
-        "flex items-center gap-2 border border-transparent"
-      ].join(" ");
-      row.disabled = !!opt.disabled;
-      row.dataset.value = opt.value;
-
-      const mark = document.createElement("span");
-      mark.className = "shrink-0 w-4";
-      mark.textContent = opt.selected ? "•" : "";
-      const lbl = document.createElement("span");
-      lbl.textContent = opt.label;
-      lbl.className = "truncate";
-
-      row.append(mark, lbl);
-      row.addEventListener("click", () => {
-        if (multiple) {
-          nativeSelect.querySelector(`option[value="${CSS.escape(opt.value)}"]`).selected = !opt.selected;
-        } else {
-          nativeSelect.value = opt.value;
-        }
-        nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
-        syncControl();
-        renderList(search.value);
-        if (!multiple) close();
-      });
-
-      list.appendChild(row);
-    });
-  }
-  function syncControl() {
-    const opts = readOptions().filter(o => o.selected);
-    chips.innerHTML = "";
-    if (!opts.length) {
-      chips.appendChild(ph);
-    } else {
-      const chip = document.createElement("span");
-      chip.className = "px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-sm flex items-center gap-1";
-      chip.innerHTML = `<span class="truncate">${opts[0].label}</span>`;
-      chips.appendChild(chip);
-      if (opts.length > 1) {
-        const more = document.createElement("span");
-        more.className = "px-2 py-0.5 rounded-full bg-gray-100 text-gray-800 text-sm";
-        more.textContent = `+${opts.length - 1}`;
-        chips.appendChild(more);
-      }
-    }
-  }
-  function open() {
-    panel.classList.remove("pointer-events-none");
-    panel.style.opacity = "1";
-    panel.style.transform = "scale(1)";
-    caret.style.transform = "rotate(180deg)";
-    search.focus();
-  }
-  function close() {
-    panel.classList.add("pointer-events-none");
-    panel.style.opacity = "0";
-    panel.style.transform = "scale(.95)";
-    caret.style.transform = "rotate(0deg)";
-  }
-  function toggle() {
-    const openNow = panel.style.opacity === "1";
-    openNow ? close() : open();
-  }
-
-  control.addEventListener("click", toggle);
-  search.addEventListener("input", () => renderList(search.value));
-  document.addEventListener("click", (e) => { if (!wrapper.contains(e.target)) close(); });
-  nativeSelect.addEventListener("change", () => { syncControl(); renderList(search.value); });
-
-  syncControl();
-  renderList();
-
-  nativeSelect._fancy = { wrapper, control, open, close, sync: syncControl, isFancy: true };
-}
-
-/* ===========================================================
-   Locks de mesas (desde pedidos)
-   =========================================================== */
-function getLockedSet() {
-  try { return new Set(JSON.parse(localStorage.getItem("mesas_locked_by_orders") || "[]")); } catch { return new Set(); }
-}
-const isMesaLockedByOrder = (idMesa) => {
-  if (typeof window.isMesaLockedByOrder === "function") return window.isMesaLockedByOrder(idMesa);
-  return getLockedSet().has(String(idMesa));
-};
-
-/* ===========================================================
-   API Mesa (best-effort)
-   =========================================================== */
-/* Cambiar SOLO el estado de una mesa (endpoint real de tu API) */
-async function tryUpdateMesaEstado(idMesa, idEstadoMesa) {
-  const url = `${API_HOST}/apiMesa/estado/${idMesa}/${idEstadoMesa}`;
-  const res = await fetch(url, { method: "PATCH" });
-  return res.ok;
-}
-
-async function fetchEstadosMesa() {
-  try {
-    const res = await fetch(`${API_HOST}/apiEstadoMesa/getDataEstadoMesa?page=0&size=50`);
-    if (!res.ok) throw new Error("No se pudo obtener estados de mesa");
-    const data = await res.json();
-    const content = Array.isArray(data) ? data : (data.content || []);
-    return content
-      .map(e => ({
-        id: Number(e.id ?? e.ID ?? e.idEstadoMesa ?? e.IDESTADOMESA),
-        nombre: String(e.nomEstado ?? e.nombre ?? e.nombreEstado ?? e.NOMBREESTADO ?? "").trim()
-      }))
-      .filter(x => Number.isFinite(x.id) && x.nombre);
-  } catch {
-    // Fallback por si está vacía la tabla
-    return [
-      { id: 1, nombre: "Disponible" },
-      { id: 2, nombre: "Ocupada" },
-      { id: 3, nombre: "Reservada" },
-      { id: 21, nombre: "Limpieza" },
-    ];
-  }
-}
-
-function nombreEstadoMesa(m) {
-  const idEstado = Number(
-    m.idEstadoMesa ?? m.IdEstadoMesa ??
-    (m.estadoMesa && (m.estadoMesa.id ?? m.estadoMesa.Id)) ??
-    (m.estado && (m.estado.id ?? m.estado.Id))
-  );
-  if (Number.isFinite(idEstado)) {
-    if (idEstado === 1) return "disponible";
-    if (idEstado === 2) return "ocupada";
-    if (idEstado === 3) return "reservada";
-    if (idEstado === 4) return "limpieza";
-  }
-  const raw = (
-    m.nomEstadoMesa ?? m.nomEstado ??
-    (m.estadoMesa && (m.estadoMesa.nomEstado ?? m.estadoMesa.nombre ?? m.estadoMesa.estado)) ??
-    (m.estado && (m.estado.nomEstado ?? m.estado.nombre ?? m.estado.estado)) ??
-    m.estado ?? ""
-  ).toString().toLowerCase();
-  if (raw.includes("dispon")) return "disponible";
-  if (raw.includes("ocup"))   return "ocupada";
-  if (raw.includes("reserv")) return "reservada";
-  if (raw.includes("limp"))   return "limpieza";
-  return "desconocido";
+function humanEstado(est) {
+  const s = (est || "").toLowerCase();
+  if (s.includes("dispon")) return "disponible";
+  if (s.includes("ocup"))   return "ocupada";
+  if (s.includes("reserv")) return "reservada";
+  if (s.includes("limp"))   return "limpieza";
+  return est || "";
 }
 const badgeClass = (estado) => ({
   disponible: "bg-emerald-100 text-emerald-800",
@@ -301,133 +94,197 @@ const badgeClass = (estado) => ({
   desconocido:"bg-gray-100 text-gray-700",
 }[estado] || "bg-gray-100 text-gray-700");
 
-/* ===========================================================
-   Picker de estado (AHORA con fancy select igual al de Pedidos)
-   =========================================================== */
-async function showEstadoPicker({ title = "Cambiar estado", estados = [], selectedId } = {}) {
-  return new Promise((resolve) => {
-    const overlay = document.createElement("div");
-    overlay.className = "fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm";
-
-    const card = document.createElement("div");
-    card.className = "w-[min(92vw,420px)] rounded-2xl bg-white shadow-xl border border-gray-200 p-4 animate-[fadeIn_.2s_ease]";
-    const options = estados.map(e => `<option value="${e.id}">${e.nombre}</option>`).join("");
-
-    card.innerHTML = `
-      <div class="text-base font-semibold mb-2">${title}</div>
-      <div class="space-y-3">
-        <label class="block text-sm text-gray-600">Estado</label>
-        <select id="picker-estado" class="w-full rounded-lg border border-gray-300 px-3 py-2 bg-white">
-          ${options}
-        </select>
-      </div>
-      <div class="mt-4 flex gap-2 justify-end">
-        <button class="btn-cancel rounded-lg px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800">Cancelar</button>
-        <button class="btn-ok rounded-lg px-3 py-2 text-white bg-blue-600 hover:bg-blue-700">Actualizar</button>
-      </div>
-    `;
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
-
-    const sel = card.querySelector("#picker-estado");
-    if (selectedId != null) sel.value = String(selectedId);
-
-    // 💄 <- APLICAMOS EL MISMO FANCY SELECT QUE EN PEDIDOS
-    upgradeSelect(sel, { placeholder: "Selecciona un estado" });
-
-    const cleanup = (val) => { overlay.remove(); resolve(val); };
-    overlay.addEventListener("click", (e) => { if (e.target === overlay) cleanup(null); });
-    card.querySelector(".btn-cancel").addEventListener("click", () => cleanup(null));
-    card.querySelector(".btn-ok").addEventListener("click", () => cleanup(Number(sel.value)));
-  });
+/* reserva ACTIVA ahora (fecha=HOY y hora actual entre inicio/fin) */
+function isToday(isoDateStr) {
+  if (!isoDateStr) return false;
+  const d = new Date(isoDateStr);
+  if (isNaN(d)) {
+    const m = String(isoDateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return false;
+    const t = new Date();
+    return Number(m[1])===t.getFullYear() && Number(m[2])===t.getMonth()+1 && Number(m[3])===t.getDate();
+  }
+  const t = new Date();
+  return d.getFullYear()===t.getFullYear() && d.getMonth()===t.getMonth() && d.getDate()===t.getDate();
+}
+function nowBetween(h1, h2) {
+  const pad = n => String(n).padStart(2,"0");
+  const t = new Date();
+  const now = `${pad(t.getHours())}:${pad(t.getMinutes())}`;
+  const a = (h1||"").slice(0,5);
+  const b = (h2||"").slice(0,5);
+  return (!a || now >= a) && (!b || now <= b);
 }
 
 /* ===========================================================
-   Render de tarjetas
+   Cargas auxiliares: pedidos y reservas (size capado a 50)
    =========================================================== */
-function renderMesaCard(mesa, estados, onChange) {
-  const estadoStr = nombreEstadoMesa(mesa);
-  const locked = isMesaLockedByOrder(mesa.idMesa ?? mesa.id ?? mesa.ID);
-  const idMesa = Number(mesa.idMesa ?? mesa.id ?? mesa.ID);
-  const numero = String(mesa.numMesa ?? mesa.numero ?? idMesa ?? "");
+async function getPedidosLight(page=0,size=MAX_SIZE) {
+  const url = `${API_HOST}/apiPedido/getDataPedido?page=${page}&size=${Math.min(size, MAX_SIZE)}`;
+  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  const text = await res.text().catch(()=> "");
+  if (!res.ok) {
+    console.warn("[PedidosLight]", res.status, text);
+    return [];
+  }
+  let data; try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+  const arr = Array.isArray(data?.content) ? data.content : [];
+  return arr.map(p => ({
+    idMesa: Number(p.idMesa ?? p.IdMesa),
+    idEstadoPedido: Number(p.idEstadoPedido ?? p.IdEstadoPedido),
+  }));
+}
+async function getReservasLight(page=0,size=MAX_SIZE) {
+  try {
+    const url = `${API_HOST}/apiReserva/getDataReserva?page=${page}&size=${Math.min(size, MAX_SIZE)}`;
+    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    const text = await res.text().catch(()=> "");
+    if (!res.ok) return [];
+    let data; try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+    const arr = Array.isArray(data?.content) ? data.content : [];
+    return arr.map(r => ({
+      idMesa: Number(r.idMesa ?? r.IdMesa),
+      idEstadoReserva: Number(r.idEstadoReserva ?? r.IdEstadoReserva),
+      fechaReserva: String(r.fechaReserva ?? r.FechaReserva ?? ""),
+      horaInicio:   String(r.horaInicio   ?? r.HoraInicio   ?? ""),
+      horaFin:      String(r.horaFin      ?? r.HoraFin      ?? ""),
+    }));
+  } catch { return []; }
+}
 
+/* ===========================================================
+   Render de tarjetas de mesa
+   =========================================================== */
+function renderMesaCard(vm, opcionesManuales, onAfterChange) {
+  const estadoStr = humanEstado(vm.nombreEstado);
   const card = document.createElement("div");
   card.className = "border border-gray-200 rounded-xl p-4 bg-white shadow-sm flex flex-col gap-3";
+
   card.innerHTML = `
     <div class="flex items-center justify-between">
-      <div class="text-lg font-semibold">Mesa ${numero}</div>
-      <span class="px-2 py-1 text-xs rounded ${badgeClass(estadoStr)} capitalize">${estadoStr}</span>
+      <div class="text-lg font-semibold">${vm.nomMesa}</div>
+      <span class="px-2 py-1 text-xs rounded ${badgeClass(estadoStr)} capitalize">${vm.nombreEstado}</span>
     </div>
-    <div class="mt-1 text-sm text-gray-600">
-      ${locked ? "<span class='text-red-600 font-medium'>Ocupada por pedido</span>" : "&nbsp;"}
+    <div class="mt-1 text-sm ${vm.locked ? "text-red-600" : "text-gray-600"}">
+      ${vm.locked ? (vm.lockReason === "ocupada" ? "Ocupada por pedido activo" : "Reservada en este horario") : "&nbsp;"}
     </div>
-    <div class="mt-auto flex justify-end">
-      <button class="btn-change rounded-lg px-3 py-2 text-white ${locked || estadoStr === "ocupada" ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}">
-        Cambiar estado
+    <div class="mt-auto flex items-center gap-2 justify-end">
+      <select class="sel-estado border rounded px-2 py-1" ${vm.locked ? "disabled" : ""}>
+        ${opcionesManuales.map(o => `<option value="${o.id}">${o.nombre}</option>`).join("")}
+      </select>
+      <button class="btn-apply rounded-lg px-3 py-2 text-white ${vm.locked ? "bg-gray-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}" ${vm.locked ? "disabled" : ""}>
+        Actualizar
       </button>
     </div>
   `;
 
-  const btn = card.querySelector(".btn-change");
+  const sel = card.querySelector(".sel-estado");
+  const btn = card.querySelector(".btn-apply");
+
   btn.addEventListener("click", async () => {
-    if (locked || estadoStr === "ocupada") {
-      await showConfirm({
-        title: "No es posible cambiar el estado",
-        message: "Esta mesa está ocupada por un pedido activo. Cancela o elimina el pedido para liberar la mesa.",
-        confirmText: "Entendido",
-        cancelText: "Cerrar",
-      });
-      return;
-    }
-    const currentId = Number(
-      mesa.idEstadoMesa ?? mesa.IdEstadoMesa ??
-      (mesa.estadoMesa && (mesa.estadoMesa.id ?? mesa.estadoMesa.Id)) ??
-      (mesa.estado && (mesa.estado.id ?? mesa.estado.Id))
-    );
-    const nuevoId = await showEstadoPicker({ estados, selectedId: currentId });
-    if (nuevoId == null || Number(nuevoId) === currentId) return;
-
-    const ok = await showConfirm({
-      title: "Actualizar estado",
-      message: `¿Cambiar la Mesa ${numero} al estado seleccionado?`,
-      confirmText: "Actualizar",
-      cancelText: "Cancelar",
-    });
-    if (!ok) return;
-
+    const nuevoId = Number(sel.value);
+    if (!Number.isFinite(nuevoId)) return;
     try {
-      const okUpdate = await tryUpdateMesaEstado(idMesa, nuevoId);
-      if (!okUpdate) throw new Error("No se pudo actualizar el estado de la mesa.");
-      showAlert("success", `Mesa ${numero} actualizada correctamente`);
-      onChange?.();
+      btn.disabled = true;
+      await patchEstadoMesa(vm.id, nuevoId);
+      showAlert("success", `${vm.nomMesa} actualizada`);
+      onAfterChange?.();
     } catch (e) {
-      showAlert("error", e.message || "Error al actualizar la mesa");
+      btn.disabled = false;
+      showAlert("error", e.message || "No se pudo actualizar la mesa");
     }
   });
 
   return card;
 }
 
+/* ===========================================================
+   Carga + cálculo de estado efectivo + render
+   =========================================================== */
 async function renderMesasGrid(container) {
   container.innerHTML = `<div class="py-10 text-center text-gray-500">Cargando mesas…</div>`;
-  const estados = await fetchEstadosMesa();
-  let mesas = [];
-  try { mesas = await getMesasForOrders(0); } catch { mesas = []; }
 
-  if (!mesas.length) {
+  const [mesas, estados, pedidos, reservas] = await Promise.all([
+    getMesas(0, MAX_SIZE),
+    getEstadosMesa(0, MAX_SIZE),
+    getPedidosLight(0, MAX_SIZE),   // <<< capado a 50
+    getReservasLight(0, MAX_SIZE),  // <<< capado a 50
+  ]);
+
+  if (!Array.isArray(mesas) || !mesas.length) {
     container.innerHTML = `<div class="py-10 text-center text-gray-500">No hay mesas para mostrar.</div>`;
     return;
   }
 
+  const estadosById  = new Map(estados.map(e => [e.id, e]));
+  const estadosLower = new Map(estados.map(e => [humanEstado(e.nombre), e]));
+
+  const ID_DISPON    = estadosLower.get("disponible")?.id ?? 1;
+  const ID_OCUPADA   = estadosLower.get("ocupada")?.id    ?? 2;
+  const ID_RESERVADA = estadosLower.get("reservada")?.id  ?? 3;
+  const ID_LIMPIEZA  = estadosLower.get("limpieza")?.id; // opcional
+
+  // Pedidos activos => mesas ocupadas (idEstadoPedido != 4 "Pagado")
+  const ocupadasSet = new Set(
+    pedidos
+      .filter(p => Number(p.idMesa) > 0 && Number(p.idEstadoPedido) !== 4)
+      .map(p => String(p.idMesa))
+  );
+
+  // Reservas activas hoy/ahora => mesas reservadas
+  const reservadasSet = new Set(
+    reservas
+      .filter(r => Number(r.idMesa) > 0 && Number(r.idEstadoReserva) === 1 /* Activa */)
+      .filter(r => isToday(r.fechaReserva))
+      .filter(r => nowBetween(r.horaInicio, r.horaFin))
+      .map(r => String(r.idMesa))
+  );
+
+  // Opciones manuales: sólo Disponible (+ Limpieza si existe)
+  const opcionesManualesBase = [{ id: ID_DISPON, nombre: estadosById.get(ID_DISPON)?.nombre || "Disponible" }];
+  if (ID_LIMPIEZA) opcionesManualesBase.push({ id: ID_LIMPIEZA, nombre: estadosById.get(ID_LIMPIEZA)?.nombre || "Limpieza" });
+
+  const view = mesas
+    .map(m => {
+      const id = Number(m.Id);
+      const etiqueta = m.NomMesa || `Mesa ${m.Numero || id}`;
+      let idEstadoEfectivo = Number(m.IdEstadoMesa) || ID_DISPON;
+      let lockReason = null;
+
+      if (reservadasSet.has(String(id))) { idEstadoEfectivo = ID_RESERVADA; lockReason = "reservada"; }
+      if (ocupadasSet.has(String(id)))   { idEstadoEfectivo = ID_OCUPADA;   lockReason = "ocupada";   }
+
+      const nombreEstado = estadosById.get(idEstadoEfectivo)?.nombre
+                        || estadosById.get(Number(m.IdEstadoMesa))?.nombre
+                        || (idEstadoEfectivo===ID_OCUPADA ? "Ocupada" : idEstadoEfectivo===ID_RESERVADA ? "Reservada" : "Disponible");
+
+      return {
+        id,
+        nomMesa: etiqueta,
+        idEstado: idEstadoEfectivo,
+        nombreEstado,
+        locked: !!lockReason,
+        lockReason,
+      };
+    })
+    .sort((a,b) => {
+      const na = Number(String(a.nomMesa).match(/\d+/)?.[0] || 0);
+      const nb = Number(String(b.nomMesa).match(/\d+/)?.[0] || 0);
+      return na - nb;
+    });
+
+  // Render
   container.innerHTML = "";
   const grid = document.createElement("div");
   grid.className = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
   container.appendChild(grid);
 
   const refresh = () => renderMesasGrid(container);
-  mesas
-    .sort((a,b) => Number(a.numMesa ?? a.numero ?? a.id ?? 0) - Number(b.numMesa ?? b.numero ?? b.id ?? 0))
-    .forEach(m => grid.appendChild(renderMesaCard(m, estados, refresh)));
+
+  view.forEach(vm => {
+    const opcionesManuales = vm.locked ? [] : [...opcionesManualesBase];
+    grid.appendChild(renderMesaCard(vm, opcionesManuales, refresh));
+  });
 }
 
 /* ===========================================================
@@ -436,14 +293,11 @@ async function renderMesasGrid(container) {
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
-  const container = $("#mesas-grid") || $("#tables-grid") || $("#mesas-container");
+  const container = $("#mesas-grid") || $("#tables-grid") || $("#mesas-container") || $("#tables-list") || $("#mesas-list");
   if (!container) {
-    console.warn("[Mesas] No se encontró el contenedor (#mesas-grid).");
+    console.warn("[Mesas] No se encontró el contenedor (#mesas-grid | #tables-grid | #mesas-container | #tables-list | #mesas-list).");
     return;
   }
-  const page = $("#mesas-page");
-  if (page) page.classList.add("p-4");
   container.classList.add("animate-[fadeIn_.2s_ease]");
-
   await renderMesasGrid(container);
 }
