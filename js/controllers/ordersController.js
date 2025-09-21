@@ -15,6 +15,17 @@ const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
 let editingId = null;
+// idPlatillo -> idDetalle de las líneas originales del pedido
+let editingOriginalLinesByPlatillo = new Map();
+// máximo idDetalle encontrado en el pedido al iniciar edición
+let editingMaxIdDetalle = 0;
+
+
+
+const K_EDIT_ID   = "order_editing_id";
+const K_EDIT_EMP  = "order_editing_emp";
+const K_EDIT_MESA = "order_editing_mesa";
+
 
 const K_SEL       = "ord_dishes_sel";
 const K_OPEN_FORM = "abrirFormularioPedido";
@@ -121,6 +132,7 @@ function upgradeSelect(nativeSelect, opts = {}) {
 
       row.append(mark, lbl);
       row.addEventListener("click", () => {
+        if (row.disabled) return;
         if (multiple) {
           nativeSelect.querySelector(`option[value="${CSS.escape(opt.value)}"]`).selected = !opt.selected;
         } else {
@@ -232,7 +244,7 @@ function applyModernSkin() {
 }
 
 /* =========================
-   ALERTAS (info / error / success) — sin emojis
+   ALERTAS (info / error / success)
    ========================= */
 function ensureAlertHost() {
   let host = document.getElementById("alerts-host");
@@ -272,7 +284,7 @@ function showAlert(type = "info", text = "", opts = {}) {
 }
 
 /* =========================
-   MODAL CONFIRM (bonito)
+   MODAL CONFIRM
    ========================= */
 function showConfirm({ title = "Confirmar", message = "", confirmText = "Aceptar", cancelText = "Cancelar", variant = "default" } = {}) {
   return new Promise((resolve) => {
@@ -327,7 +339,6 @@ function resetOrderForm() {
   if (table) { table.value = ""; table.dispatchEvent(new Event("change", { bubbles: true })); }
   if (waiter) { waiter.value = ""; waiter.dispatchEvent(new Event("change", { bubbles: true })); }
   if (estado) {
-    // default al primer estado cargado
     if (ESTADOS_ORDER[0]) estado.value = String(ESTADOS_ORDER[0].id);
     else estado.value = "";
     estado.dispatchEvent(new Event("change", { bubbles: true }));
@@ -348,10 +359,9 @@ function lockMesaLocal(idMesa) {
 function unlockMesaLocal(idMesa) {
   const s = getLockedSet(); s.delete(String(idMesa)); saveLockedSet(s);
 }
-window.isMesaLockedByOrder = (idMesa) => getLockedSet().has(String(idMesa)); // util p/ pantalla Mesas
+window.isMesaLockedByOrder = (idMesa) => getLockedSet().has(String(idMesa));
 
 // ---- API Mesa (best-effort; ajusta si tu backend difiere) ----
-// === API Mesa (endpoint real) ===
 const API_HOST = "http://localhost:8080";
 
 async function tryUpdateMesaEstado(idMesa, idEstadoMesa) {
@@ -359,7 +369,6 @@ async function tryUpdateMesaEstado(idMesa, idEstadoMesa) {
   const res = await fetch(url, { method: "PATCH" });
   return res.ok;
 }
-
 async function ocuparMesa(idMesa)  { await tryUpdateMesaEstado(idMesa, 2); } // Ocupada
 async function liberarMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 1); } // Disponible
 
@@ -442,51 +451,67 @@ async function cargarCatalogos() {
     plats.map(p => [Number(p.id), { id: Number(p.id), nomPlatillo: p.nombre, precio: Number(p.precio || 0) }])
   );
 }
-// CARGA MESEROS (EMPLEADOS)
-async function cargarEmpleados(waiterSelect) {
-  if (!waiterSelect) {
-    console.warn("[UI] Falta el <select id='waiter-select'> en el HTML");
-  }
 
-  // limpia y agrega opción placeholder
-  waiterSelect.innerHTML = `<option value="">Seleccione un mesero</option>`;
+/* =========================
+   Mesero (autocompletado + bloqueado)
+   ========================= */
+// Autocompleta el mesero con un empleado REAL de la API y bloquea el select.
+// Si existe sessionStorage.ord_user con un id válido, lo usa; si no, usa el primer empleado.
+// Autocompleta el mesero con un empleado REAL de la API y bloquea el select.
+// Si pasas { initialId }, lo usa (editar). Si no, usa ord_user o el primero de la API.
+// Autocompleta el mesero con un empleado REAL de la API y bloquea el select.
+// Si pasas { initialId }, lo usa (editar). Si no, usa ord_user o el primero de la API.
+async function cargarEmpleados(waiterSelect, opts = {}) {
+  if (!waiterSelect) return;
+  const { initialId = null } = opts;
 
-  // Llama a tu service: /apiEmpleado/getDataEmpleado?page=0&size=10
-  let data = [];
+  const url = `${API_HOST}/apiEmpleado/getDataEmpleado?page=0&size=50`;
+
+  let empleados = [];
   try {
-    data = await getEmpleados(0, 10); // este service debe devolver [{id, nombre}]
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json().catch(() => ({}));
+    empleados = Array.isArray(data?.content) ? data.content : (Array.isArray(data) ? data : []);
   } catch (e) {
     console.error("[Empleados] Error al obtener empleados:", e);
   }
 
-  // Si tu service devuelve el JSON crudo que me pasaste (content con {id,...}),
-  // puedes mapear así (por si tu service aún no normaliza):
-  if (!Array.isArray(data) || !data.length || data[0].idPersona !== undefined) {
-    // data viene crudo (con "content")
-    const raw = (data && Array.isArray(data.content)) ? data.content : [];
-    data = raw.map(e => ({ id: Number(e.id), nombre: `Empleado ${e.id}` }));
+  // Elegir ID preferido
+  let preferredId = null;
+  if (Number.isFinite(Number(initialId))) preferredId = Number(initialId);
+  else {
+    try {
+      const user = JSON.parse(sessionStorage.getItem("ord_user") || "null");
+      if (user && Number.isFinite(Number(user.id))) preferredId = Number(user.id);
+    } catch {}
   }
+  if (!preferredId && empleados.length) preferredId = Number(empleados[0].id ?? empleados[0].Id);
 
-  // Guarda en el mapa y llena el select
-  MAP_EMPLEADOS = new Map(data.map(e => [Number(e.id), e]));
-  for (const emp of data) {
-    const opt = document.createElement("option");
-    opt.value = String(emp.id);
-    opt.textContent = emp.nombre || `Empleado ${emp.id}`;
-    waiterSelect.appendChild(opt);
-  }
+  // Etiqueta legible (EmpleadoDTO no trae nombre)
+  let label = `Empleado #${preferredId || "-"}`;
+  try {
+    const user = JSON.parse(sessionStorage.getItem("ord_user") || "null");
+    if (user && Number(user.id) === preferredId) {
+      label = `${user.nombre || label}${user.username ? " — " + user.username : ""}`;
+    }
+  } catch {}
 
-  // estilos + mejora visual
+  waiterSelect.innerHTML = "";
+  const opt = document.createElement("option");
+  opt.value = preferredId ? String(preferredId) : "";
+  opt.textContent = label;
+  opt.selected = true;
+  waiterSelect.appendChild(opt);
+
+  waiterSelect.disabled = true;
+  waiterSelect.title = "Se completa automáticamente con el mesero de la cuenta / pedido.";
   waiterSelect.className =
-    "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base bg-white shadow-sm";
-
-  // preselecciona el primero si no hay selección
-  if (!waiterSelect.value && waiterSelect.options.length > 1) {
-    waiterSelect.value = waiterSelect.options[1].value;
-  }
-
-  upgradeSelect(waiterSelect, { placeholder: "Mesero" });
+    "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 text-sm md:text-base bg-gray-100 shadow-sm cursor-not-allowed";
+  if (typeof upgradeSelect === "function") upgradeSelect(waiterSelect, { placeholder: "Mesero" });
 }
+
+
 
 
 /* =========================
@@ -516,57 +541,169 @@ function nombreEstadoMesa(m) {
   if (raw.includes("limp"))   return "limpieza";
   return "desconocido";
 }
-// CARGA MESAS
-async function cargarMesasSelect() {
-  const sel = document.getElementById("table-select");
-  if (!sel) {
-    console.warn("[UI] Falta el <select id='table-select'> en el HTML");
-    return;
+function tituloEstado(s) {
+  const t = String(s||"").toLowerCase();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+function idMesaFrom(m) {
+  return Number(m.id ?? m.Id ?? m.idMesa ?? m.IdMesa ?? m.codigo ?? m.numMesa ?? m.numero ?? NaN);
+}
+function nombreMesaFrom(m) {
+  return String(m?.nomMesa ?? m?.numero ?? m?.numMesa ?? idMesaFrom(m) ?? "?");
+}
+
+// Normaliza el estado de la mesa leyendo varios posibles campos
+function getEstadoMesaNormalized(m) {
+  // 1) Numérico (catálogo típico: 1=Disponible, 2=Ocupada, 3=Reservada, 4=Limpieza)
+  const idE = Number(
+    m.idEstadoMesa ?? m.IdEstadoMesa ??
+    (m.estadoMesa && (m.estadoMesa.id ?? m.estadoMesa.Id)) ??
+    (m.estado && (m.estado.id ?? m.estado.Id))
+  );
+  if (Number.isFinite(idE) && idE > 0) {
+    if (idE === 1) return "disponible";
+    if (idE === 2) return "ocupada";
+    if (idE === 3) return "reservada";
+    if (idE === 4) return "limpieza";
   }
+
+  // 2) Texto (por si el backend manda el nombre del estado)
+  const raw = (
+    m.nomEstadoMesa ?? m.nomEstado ??
+    (m.estadoMesa && (m.estadoMesa.nomEstado ?? m.estadoMesa.nombre ?? m.estadoMesa.estado)) ??
+    (m.estado && (m.estado.nomEstado ?? m.estado.nombre ?? m.estado.estado)) ??
+    m.estado ?? ""
+  ).toString().toLowerCase();
+
+  if (raw.includes("dispon")) return "disponible";
+  if (raw.includes("ocup"))   return "ocupada";
+  if (raw.includes("reserv")) return "reservada";
+  if (raw.includes("limp"))   return "limpieza";
+
+  return "desconocido";
+}
+
+
+// === RUTA FIJA y tamaño permitido por tu backend (size <= 50) ===
+// Ruta fija de tu backend (size <= 50) y estado normalizado
+// Ruta fija de tu backend (size <= 50) y estado normalizado
+// Carga mesas desde la API y pinta el select con el estado REAL (no inventado)
+// Carga mesas mostrando el ESTADO REAL desde /apiEstadoMesa y bloquea las no disponibles
+// Carga mesas con ESTADO REAL: cruza Mesa + EstadoMesa + Pedido + EstadoPedido.
+// Solo habilita las mesas cuyo estado final quede en "Disponible".
+// Carga mesas con el estado REAL; habilita solo "Disponible".
+// Si pasas { allowCurrentId }, esa mesa se muestra habilitada como "(actual)" para poder conservarla al editar.
+// Carga mesas con estado REAL: Mesa + EstadoMesa + Pedido + EstadoPedido.
+// Habilita solo "Disponible". Si allowCurrentId coincide, permite mantenerla aunque esté ocupada (al editar).
+// Carga mesas con estado REAL: Mesa + EstadoMesa + Pedido + EstadoPedido.
+// Habilita solo "Disponible". Si allowCurrentId coincide, permite mantenerla aunque esté ocupada (al editar).
+async function cargarMesasSelect(opts = {}) {
+  const { allowCurrentId = null } = opts;
+  const sel = document.getElementById("table-select");
+  if (!sel) return;
 
   sel.className =
     "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base bg-white shadow-sm";
+  sel.innerHTML = `<option value="" disabled selected>Seleccione una mesa disponible…</option>`;
 
-  sel.innerHTML = `<option value="">Seleccione una mesa</option>`;
+  const urlMesas   = `${API_HOST}/apiMesa/getDataMesa?page=0&size=50`;
+  const urlEM      = `${API_HOST}/apiEstadoMesa/getDataEstadoMesa?page=0&size=50`;
+  const urlPed     = `${API_HOST}/apiPedido/getDataPedido?page=0&size=50`;
+  const urlEP      = `${API_HOST}/apiEstadoPedido/getDataEstadoPedido?page=0&size=50`;
 
-  // Llama a tu service: /apiMesa/getDataMesa?page=0&size=10
-  let mesas = [];
+  const getId = (o) => Number(o.id ?? o.Id);
+  const nomMesa = (m) => String(m.nomMesa ?? `Mesa ${getId(m)}`);
+  const idEstMesa = (m) => Number(m.idEstadoMesa ?? m.IdEstadoMesa);
+  const nomEstadoMesa = (e) => String(e.estadoMesa ?? e.nombre ?? e.nomEstado ?? e.estado ?? "").trim();
+  const nomEstadoPedido = (e) => String(e.nomEstado ?? e.nombre ?? "").trim();
+  const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s);
+
+  let mesas=[], estadosMesa=[], pedidos=[], estadosPed=[];
   try {
-    mesas = await getMesasForOrders(0, 10); // puede devolver crudo o normalizado
+    const [rM, rEM, rP, rEP] = await Promise.all([fetch(urlMesas), fetch(urlEM), fetch(urlPed), fetch(urlEP)]);
+    if (!rM.ok || !rEM.ok || !rP.ok || !rEP.ok) throw new Error("HTTP error");
+    const [dM, dEM, dP, dEP] = await Promise.all([rM.json(), rEM.json(), rP.json(), rEP.json()]);
+    mesas = Array.isArray(dM?.content) ? dM.content : (Array.isArray(dM) ? dM : []);
+    estadosMesa = Array.isArray(dEM?.content) ? dEM.content : (Array.isArray(dEM) ? dEM : []);
+    pedidos = Array.isArray(dP?.content) ? dP.content : (Array.isArray(dP) ? dP : []);
+    estadosPed = Array.isArray(dEP?.content) ? dEP.content : (Array.isArray(dEP) ? dEP : []);
   } catch (e) {
-    console.error("[Mesas] Error al obtener mesas:", e);
+    console.error("[Mesas] Error al obtener datos:", e);
+    if (typeof upgradeSelect === "function") upgradeSelect(sel, { placeholder: "Mesa" });
+    return;
   }
 
-  // Si vino crudo (con "content"), tómalo de ahí
-  if (!Array.isArray(mesas) || (mesas.length && mesas[0].nomMesa === undefined && mesas[0].idEstadoMesa === undefined)) {
-    const raw = (mesas && Array.isArray(mesas.content)) ? mesas.content : [];
-    mesas = raw;
+  const MAP_ID_ESTADO_MESA_NOMBRE = new Map(estadosMesa.map(e => [getId(e), nomEstadoMesa(e)]));
+  const MAP_ID_ESTADO_PED_NOMBRE  = new Map(estadosPed.map(e => [getId(e), nomEstadoPedido(e)]));
+
+  // Detectar "Disponible" por nombre del catálogo de MESA (no por hardcode)
+  let idDisponible = null;
+  for (const e of estadosMesa) { if (nomEstadoMesa(e).toLowerCase().includes("dispon")) { idDisponible = getId(e); break; } }
+  if (idDisponible == null) {
+    console.warn("[Mesas] No hay estado 'Disponible' en catálogo.");
+    if (typeof upgradeSelect === "function") upgradeSelect(sel, { placeholder: "Mesa" });
+    return;
   }
 
-  // Ordena por id asc
-  mesas.sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
+  // Estados de pedido cerrados (no ocupan mesa)
+  const esPedidoCerrado = (nombre) => {
+    const s = (nombre || "").toLowerCase();
+    return s.includes("pag") || s.includes("final") || s.includes("cancel") ||
+           s.includes("cerr") || s.includes("entreg") || s.includes("complet") ||
+           s.includes("rechaz") || s.includes("anul");
+  };
 
-  // Pinta opciones (idEstadoMesa: 1=Disponible, 2=Ocupada)
+  // Mesas con pedido ACTIVO
+  const mesasConPedidoActivo = new Set(
+    pedidos
+      .filter(p => !esPedidoCerrado(MAP_ID_ESTADO_PED_NOMBRE.get(Number(p.idEstadoPedido ?? p.IdEstadoPedido)) || ""))
+      .map(p => Number(p.idMesa ?? p.IdMesa))
+      .filter(Boolean)
+  );
+
+  mesas.sort((a, b) => getId(a) - getId(b));
+
+  sel.innerHTML = `<option value="" disabled selected>Seleccione una mesa disponible…</option>`;
   for (const m of mesas) {
-    const idMesa   = Number(m.id);
-    const nombre   = String(m.nomMesa ?? `Mesa ${idMesa}`);
-    const idEstado = Number(m.idEstadoMesa);
+    const id = getId(m);
+    const nombre = nomMesa(m);
+    const idEst = idEstMesa(m);
+    const nomEst = MAP_ID_ESTADO_MESA_NOMBRE.get(idEst) || "Desconocido";
+
+    // Estado efectivo: si hay pedido activo, consideramos Ocupada
+    const estadoEfectivo = mesasConPedidoActivo.has(id) ? "Ocupada" : nomEst;
+    let habilitada = (!mesasConPedidoActivo.has(id)) && (idEst === idDisponible);
+    let etiqueta = `${nombre} — ${cap(estadoEfectivo)}`;
+
+    if (allowCurrentId && Number(allowCurrentId) === id && !habilitada) {
+      habilitada = true;
+      etiqueta = `${etiqueta} (actual)`;
+    }
 
     const opt = document.createElement("option");
-    opt.value = String(idMesa);
-    opt.textContent = (idEstado === 1) ? nombre : `${nombre} (${idEstado === 2 ? "ocupada" : "no disponible"})`;
-    if (idEstado !== 1) opt.disabled = true;
+    opt.value = String(id);
+    opt.textContent = etiqueta;
+    opt.dataset.estado = estadoEfectivo.toLowerCase();
+    if (!habilitada) {
+      opt.disabled = true;
+      opt.title = `No seleccionable: ${cap(estadoEfectivo)}`;
+    }
     sel.appendChild(opt);
   }
 
-  // Si no hay selección, elige la primera disponible
-  if (!sel.value) {
-    const firstEnabled = Array.from(sel.options).find(o => o.value && !o.disabled);
-    if (firstEnabled) sel.value = firstEnabled.value;
-  }
+  sel.addEventListener("change", () => {
+    const o = sel.options[sel.selectedIndex];
+    if (o && o.disabled) sel.selectedIndex = 0;
+  });
 
-  upgradeSelect(sel, { placeholder: "Mesa" });
+  if (typeof upgradeSelect === "function") upgradeSelect(sel, { placeholder: "Mesa" });
 }
+
+
+
+
+
+
 
 
 
@@ -581,7 +718,6 @@ function fromApi(p) {
   const nombreCliente = (p.nombreCliente ?? p.nombrecliente ?? p.Cliente ?? p.cliente ?? "").toString();
   const idMesa = Number(p.idMesa ?? p.IdMesa ?? p.mesaId ?? 0);
 
-  // NUEVO: si viene p.items[], mapeamos todos los platillos; fallback: un solo platillo del encabezado
   let platillos = [];
   if (Array.isArray(p.items) && p.items.length) {
     platillos = p.items.map(it => {
@@ -589,8 +725,10 @@ function fromApi(p) {
       const cant   = Number(it.cantidad ?? it.Cantidad ?? 1);
       const pu     = (it.precioUnitario ?? it.PrecioUnitario);
       const info   = MAP_PLATILLOS.get(idPlat);
+      const idDet  = Number(it.idDetalle ?? it.IdDetalle ?? it.linea ?? it.Linea ?? 0);
       return {
         idPlatillo: idPlat,
+        idDetalle:  Number.isFinite(idDet) ? idDet : undefined,
         nombre: info?.nomPlatillo ?? `#${idPlat}`,
         cantidad: cant,
         precio: Number(pu ?? info?.precio ?? 0)
@@ -602,25 +740,17 @@ function fromApi(p) {
     const info   = MAP_PLATILLOS.get(idPlat);
     platillos = idPlat ? [{
       idPlatillo: idPlat,
+      idDetalle:  undefined,
       nombre: info?.nomPlatillo ?? (p.platillo?.nomPlatillo ?? p.nomPlatillo ?? "Platillo"),
       cantidad: cant,
       precio: Number(info?.precio ?? 0)
     }] : [];
   }
 
-  // Calcula subtotal desde items si no viene del backend
-const subtotalCalc = platillos.reduce(
-  (acc, x) => acc + (Number(x.precio) || 0) * (Number(x.cantidad) || 0),
-  0
-);
-
-// Usa nullish coalescing de forma segura (sin mezclar con ||)
-const subtotal = Number((p.subtotal ?? p.Subtotal ?? subtotalCalc) ?? 0);
-
-// Propina y total con fallback numérico
-const propina = Number(p.propina ?? p.Propina ?? +(subtotal * 0.10).toFixed(2));
-const total   = Number(p.totalPedido ?? p.TotalPedido ?? +(subtotal + propina).toFixed(2));
-
+  const subtotalCalc = platillos.reduce((acc, x) => acc + (Number(x.precio) || 0) * (Number(x.cantidad) || 0), 0);
+  const subtotal = Number((p.subtotal ?? p.Subtotal ?? subtotalCalc) ?? 0);
+  const propina  = Number(p.propina ?? p.Propina ?? +(subtotal * 0.10).toFixed(2));
+  const total    = Number(p.totalPedido ?? p.TotalPedido ?? +(subtotal + propina).toFixed(2));
 
   return {
     id,
@@ -641,6 +771,7 @@ const total   = Number(p.totalPedido ?? p.TotalPedido ?? +(subtotal + propina).t
     Observaciones: (p.observaciones ?? p.Observaciones ?? "").toString()
   };
 }
+
 
 /* =========================
    Tarjeta de pedido
@@ -684,7 +815,6 @@ function agregarTarjetaPedido(pedido, container) {
     </div>
   `;
 
-  // Eliminar con confirm modal
   card.querySelector(".btn-eliminar").addEventListener("click", async (ev) => {
     ev.stopPropagation();
     const ok = await showConfirm({
@@ -702,7 +832,6 @@ function agregarTarjetaPedido(pedido, container) {
       await deletePedido(pedido.id);
       card.remove();
       showAlert("success", "Pedido eliminado correctamente");
-      // liberar mesa
       const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
       if (idMesa) await liberarMesa(idMesa);
     } catch (e) {
@@ -710,13 +839,11 @@ function agregarTarjetaPedido(pedido, container) {
     }
   });
 
-  // Editar
   card.querySelector(".btn-editar").addEventListener("click", (ev) => {
     ev.stopPropagation();
     abrirEdicionDesdeCard(pedido);
   });
 
-  // Cambiar estado — AHORA enviamos items[] actuales del pedido
   card.querySelector(".estado-pill").addEventListener("click", async (ev) => {
     ev.stopPropagation();
     try {
@@ -746,7 +873,6 @@ function agregarTarjetaPedido(pedido, container) {
       const pill = card.querySelector(".estado-pill");
       if (pill && newName) pill.textContent = newName;
 
-      // si pasa a cancelado/anulado, liberar mesa
       if ((newName || "").toLowerCase().includes("cancel")) {
         const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
         if (idMesa) await liberarMesa(idMesa);
@@ -764,28 +890,61 @@ function agregarTarjetaPedido(pedido, container) {
 /* =========================
    Edición
    ========================= */
+let editingOriginalMesaId = null;
+let editingOriginalPlatillos = new Set();
+
 function abrirEdicionDesdeCard(pedido) {
   editingId = Number(pedido.id);
+  editingOriginalMesaId = Number(pedido.idMesa || 0);
 
-  $("#customer-name").value  = pedido.Cliente || "";
-  $("#table-select").value   = String(pedido.idMesa || "");
-  $("#waiter-select").value  = String(pedido.idEmpleado || "");
+  // set con platillos originales
+  editingOriginalPlatillos = new Set(
+    (pedido.Platillos || []).map(pl => Number(pl.idPlatillo)).filter(Boolean)
+  );
+
+  // mapa idPlatillo -> idDetalle + max idDetalle
+  editingOriginalLinesByPlatillo = new Map();
+  editingMaxIdDetalle = 0;
+  (pedido.Platillos || []).forEach(pl => {
+    const idP  = Number(pl.idPlatillo);
+    const idDet = Number(pl.idDetalle ?? pl.linea ?? 0);
+    if (idP && idDet) {
+      editingOriginalLinesByPlatillo.set(idP, idDet);
+      if (idDet > editingMaxIdDetalle) editingMaxIdDetalle = idDet;
+    }
+  });
+
+  $("#customer-name").value = pedido.Cliente || "";
+  $("#order-notes").value   = pedido.Observaciones || "";
 
   const selEstado = $("#status-select");
   if (selEstado && selEstado.querySelector(`option[value="${pedido.idEstadoPedido}"]`)) {
     selEstado.value = String(pedido.idEstadoPedido);
   }
 
-  $("#order-notes").value    = pedido.Observaciones || "";
-
   const sel = (pedido.Platillos || []).map(pl => ({
     id: pl.idPlatillo || 0,
+    idDetalle: pl.idDetalle,            // lo conservamos en la selección
     nombre: pl.nombre,
     precio: Number(pl.precio || 0),
     qty: Number(pl.cantidad || 1)
   }));
   setSeleccion(sel);
   renderSeleccionUI();
+
+  const waiterSelect = $("#waiter-select");
+  const tableSelect  = $("#table-select");
+
+  Promise.resolve()
+    .then(() => cargarEmpleados(waiterSelect, { initialId: pedido.idEmpleado }))
+    .then(() => cargarMesasSelect({ allowCurrentId: pedido.idMesa }))
+    .then(() => {
+      if (tableSelect && pedido.idMesa) {
+        tableSelect.value = String(pedido.idMesa);
+        tableSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        if (tableSelect._fancy?.sync) tableSelect._fancy.sync();
+      }
+    });
 
   const saveBtn = $("#save-order-btn");
   if (saveBtn) saveBtn.textContent = "Actualizar pedido";
@@ -794,6 +953,11 @@ function abrirEdicionDesdeCard(pedido) {
   $("#orders-list").classList.add("hidden");
   $("#new-order-btn").classList.add("hidden");
 }
+
+
+
+
+
 
 /* =========================
    Lista
@@ -914,18 +1078,16 @@ function renderSeleccionUI() {
 }
 
 /* =========================
-   Payloads + Validación — AHORA UN SOLO payload con items[]
+   Payloads + Validación — UN payload con items[]
    ========================= */
-// === REEMPLAZA COMPLETO ESTE MÉTODO EN ordersController.js ===
-// === REEMPLAZA COMPLETO ESTE MÉTODO EN ordersController.js ===
 function buildPayloadsFromSelection() {
   const seleccion = getSeleccion();
 
-  // --- Cliente ---
+  // Cliente
   const nombreCliente = ($("#customer-name")?.value || "").trim();
   if (!nombreCliente) { markInvalid("customer-name"); showAlert("error","El nombre del cliente es obligatorio"); throw new Error("VALIDATION"); }
 
-  // --- Mesa (autoselección si está vacío) ---
+  // Mesa
   const mesaSel = document.getElementById("table-select");
   let idMesa = Number(mesaSel?.value || "");
   if (!Number.isFinite(idMesa) || idMesa <= 0) {
@@ -934,7 +1096,7 @@ function buildPayloadsFromSelection() {
   }
   if (!Number.isFinite(idMesa) || idMesa <= 0) { markInvalid("table-select"); showAlert("error","Selecciona una mesa válida"); throw new Error("VALIDATION"); }
 
-  // --- Mesero (autoselección si está vacío) ---
+  // Mesero
   const waiterSel = document.getElementById("waiter-select");
   let idEmpleado = Number(waiterSel?.value || "");
   if (!Number.isFinite(idEmpleado) || idEmpleado <= 0) {
@@ -943,55 +1105,82 @@ function buildPayloadsFromSelection() {
   }
   if (!Number.isFinite(idEmpleado) || idEmpleado <= 0) { markInvalid("waiter-select"); showAlert("error","Selecciona un mesero válido"); throw new Error("VALIDATION"); }
 
-  // --- Estado ---
+  // Estado
   let idEstadoPedido = Number($("#status-select")?.value || "");
   if (!Number.isFinite(idEstadoPedido) || idEstadoPedido <= 0) {
     if (ESTADOS_ORDER?.length) idEstadoPedido = Number(ESTADOS_ORDER[0].id);
   }
   if (!Number.isFinite(idEstadoPedido) || idEstadoPedido <= 0) { markInvalid("status-select"); showAlert("error","Selecciona un estado válido"); throw new Error("VALIDATION"); }
 
-  // --- Platillos seleccionados ---
+  // Platillos seleccionados
   if (!Array.isArray(seleccion) || !seleccion.length) { showAlert("info","Agrega al menos un platillo"); throw new Error("VALIDATION"); }
 
-  // Agrupar por idPlatillo y conservar precio unitario
+  // Agrupar por idPlatillo y conservar precio unitario + idDetalle (si existe)
   const agrupados = new Map();
   for (const it of seleccion) {
     const idPlatillo = Number((it && it.id) ?? (it && it.idPlatillo));
     const qty = Math.max(1, Number((it && it.qty) ?? (it && it.cantidad) ?? 1));
     const precio = Number((it && it.precio) ?? (MAP_PLATILLOS.get(idPlatillo)?.precio) ?? 0);
+    const idDetSel = Number(it?.idDetalle ?? 0);
+
     if (!Number.isFinite(idPlatillo) || idPlatillo <= 0) continue;
 
-    const prev = agrupados.get(idPlatillo) || { cantidad: 0, precioUnitario: 0 };
+    const prev = agrupados.get(idPlatillo) || { cantidad: 0, precioUnitario: 0, idDetalle: undefined };
     prev.cantidad += qty;
     if (Number.isFinite(precio) && precio > 0) prev.precioUnitario = precio;
+
+    // si venía idDetalle en la selección, lo guardamos
+    if (Number.isFinite(idDetSel) && idDetSel > 0) prev.idDetalle = idDetSel;
+
     agrupados.set(idPlatillo, prev);
   }
 
-  const items = Array.from(agrupados.entries()).map(([idPlatillo, v]) => ({
-    idPlatillo,
-    cantidad: v.cantidad,
-    precioUnitario: Number(v.precioUnitario || 0)
-  }));
-  if (!items.length) { showAlert("info","Agrega al menos un platillo válido"); throw new Error("VALIDATION"); }
+  // Construir items:
+  // - si estamos EDITANDO (editingId != null):
+  //     * si existe idDetalle en el mapeo original → lo usamos
+  //     * si no, asignamos un idDetalle nuevo: max+1, max+2, ...
+  // - si es NUEVO (crear) → no mandamos idDetalle (backend lo asigna)
+  let lineCounter = editingMaxIdDetalle || 0;
+  const items = Array.from(agrupados.entries()).map(([idPlatillo, v]) => {
+    const base = {
+      idPlatillo: Number(idPlatillo),
+      cantidad: v.cantidad,
+      precioUnitario: Number(v.precioUnitario || 0)
+    };
+    if (editingId != null) {
+      const idDet =
+        (editingOriginalLinesByPlatillo.get(Number(idPlatillo))) ??
+        (Number.isFinite(v.idDetalle) && v.idDetalle > 0 ? v.idDetalle : undefined);
 
-  // Totales (como en tu Postman)
+      if (Number.isFinite(idDet) && idDet > 0) {
+        base.idDetalle = idDet;
+      } else {
+        // línea nueva en modo edición → asignamos un idDetalle que no choque
+        lineCounter += 1;
+        base.idDetalle = lineCounter;
+      }
+    }
+    return base;
+  });
+
+  if (!items.length) { showAlert("info","Agrega al menos un platillo válido"); throw new Error("VALIDATION"); }
+  // actualizar contador global para próximas ediciones
+  editingMaxIdDetalle = lineCounter;
+
+  // Totales
   const subtotal = items.reduce((acc, it) => acc + (it.precioUnitario || 0) * (it.cantidad || 0), 0);
   const propina  = +(subtotal * 0.10).toFixed(2);
   const total    = +(subtotal + propina).toFixed(2);
 
-  // Observaciones
   const observaciones = ($("#order-notes")?.value || "").trim() || "Sin cebolla";
-
-  // Fecha+Hora local (como en tu JSON que funcionó)
   const fpedido = formatDateTimeLocal(new Date());
 
-  // === ÚNICO objeto (NO array) ===
   return {
     totalPedido: Number(total.toFixed(2)),
     subtotal:    Number(subtotal.toFixed(2)),
     propina:     Number(propina.toFixed(2)),
-    fpedido,                    // "YYYY-MM-DDTHH:mm:ss"
-    items,                      // [{idPlatillo, cantidad, precioUnitario}]
+    fpedido,
+    items,                      // [{idPlatillo,cantidad,precioUnitario, (idDetalle si edit)}]
     nombreCliente,
     observaciones,
     idMesa,
@@ -1001,25 +1190,39 @@ function buildPayloadsFromSelection() {
 }
 
 
-
-
-
 /* =========================
    Crear / Actualizar
    ========================= */
 async function crearPedidoDesdeSeleccion() {
-  const body = buildPayloadsFromSelection();   // ahora devuelve un OBJETO
-  await createPedido(body);                    // envíalo tal cual
-  if (body.idMesa) await ocuparMesa(body.idMesa); // marcar mesa ocupada
+  const body = buildPayloadsFromSelection();
+  await createPedido(body);
+  if (body.idMesa) await ocuparMesa(body.idMesa);
 }
 
-
-
+// Reemplaza COMPLETO
 async function actualizarPedido(editId) {
   if (!Number.isFinite(editId)) throw new Error("ID inválido para actualizar.");
-  const body = buildPayloadsFromSelection();
+  const body = buildPayloadsFromSelection();   // incluye idDetalle cuando corresponde
+
   await updatePedido(editId, body);
+
+  // Si cambió la mesa, liberar la anterior y ocupar la nueva
+  const nuevaMesaId = Number(body.idMesa || 0);
+  const mesaAntes   = Number(editingOriginalMesaId || 0);
+  if (mesaAntes && nuevaMesaId && mesaAntes !== nuevaMesaId) {
+    try { await liberarMesa(mesaAntes); } catch {}
+    try { await ocuparMesa(nuevaMesaId); } catch {}
+  }
+
+  // limpiar contexto de edición
+  editingOriginalMesaId = null;
+  editingOriginalPlatillos = new Set();
+  editingOriginalLinesByPlatillo = new Map();
+  editingMaxIdDetalle = 0;
 }
+
+
+
 
 
 /* =========================
@@ -1036,41 +1239,74 @@ async function init() {
   const saveOrderBtn    = $("#save-order-btn");
   const addDishesBtn    = $("#add-dishes-btn");
   const waiterSelect    = $("#waiter-select");
+  const tableSelect     = $("#table-select");
 
-  await cargarCatalogos();                 // estados + platillos
+  // 1) Catálogos y lista de pedidos
+  await cargarCatalogos(); // estados + platillos
   await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
 
-  await cargarEmpleados(waiterSelect);     // <<--- AQUÍ
-  await cargarMesasSelect();               // <<--- Y AQUÍ
+  // 2) Cargar selects por defecto (si se abre el form después se re-cargan)
+  await cargarEmpleados(waiterSelect);
+  await cargarMesasSelect();
 
+  // 3) Abrir “nuevo pedido”
   newOrderBtn?.addEventListener("click", () => {
+    // limpiar cualquier rastro de edición
     editingId = null;
+    sessionStorage.removeItem(K_EDIT_ID);
+    sessionStorage.removeItem(K_EDIT_EMP);
+    sessionStorage.removeItem(K_EDIT_MESA);
+
     clearSnapshots();
-    resetOrderForm();                 // <<--- LIMPIAR TODO
+    resetOrderForm();
+
     newOrderForm.classList.remove("hidden");
     ordersList.classList.add("hidden");
     newOrderBtn.classList.add("hidden");
-    orderTime.value = new Date().toLocaleDateString("es-ES");
-    // limpiar hash si quedó de una navegación previa
+    if (orderTime) orderTime.value = new Date().toLocaleDateString("es-ES");
+
+    // preparar selects
+    cargarEmpleados(waiterSelect);
+    cargarMesasSelect();
+
     if (location.hash === "#new") history.replaceState({}, "", location.pathname);
   });
 
+  // 4) Volver a la lista
   backToOrdersBtn?.addEventListener("click", () => {
     newOrderForm.classList.add("hidden");
     ordersList.classList.remove("hidden");
     newOrderBtn.classList.remove("hidden");
+
     setSeleccion([]); renderSeleccionUI();
     editingId = null;
-    if (saveOrderBtn) saveOrderBtn.textContent = "Guardar pedido";
+
+    // limpiar estado de edición
+    sessionStorage.removeItem(K_EDIT_ID);
+    sessionStorage.removeItem(K_EDIT_EMP);
+    sessionStorage.removeItem(K_EDIT_MESA);
+
+    const saveBtn = $("#save-order-btn");
+    if (saveBtn) saveBtn.textContent = "Guardar pedido";
   });
 
+  // 5) Ir a seleccionar platillos
   addDishesBtn?.addEventListener("click", () => {
     saveFormSnapshot();
     sessionStorage.setItem(K_OPEN_FORM, "1");
+
+    // si estamos editando, persistir ids necesarios
+    if (Number.isFinite(Number(editingId)) && editingId > 0) {
+      sessionStorage.setItem(K_EDIT_ID,   String(editingId));
+      sessionStorage.setItem(K_EDIT_EMP,  String($("#waiter-select")?.value || ""));
+      sessionStorage.setItem(K_EDIT_MESA, String($("#table-select")?.value  || ""));
+    }
+
     const back = (location.pathname.split("/").pop() || "orders.html") + "#new";
     window.location.href = `menu.html?select=1&back=${encodeURIComponent(back)}`;
   });
 
+  // 6) Guardar (crear/actualizar)
   saveOrderBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
     try {
@@ -1085,15 +1321,23 @@ async function init() {
         editingId = null;
       }
 
-      resetOrderForm(); // dejar listo para un alta nueva
+      // limpiar estado de edición SIEMPRE
+      sessionStorage.removeItem(K_EDIT_ID);
+      sessionStorage.removeItem(K_EDIT_EMP);
+      sessionStorage.removeItem(K_EDIT_MESA);
+      editingOriginalMesaId = null;
+      editingOriginalPlatillos = new Set();
 
+      // dejar form limpio y volver a la lista
+      resetOrderForm();
       newOrderForm.classList.add("hidden");
       ordersList.classList.remove("hidden");
       newOrderBtn.classList.remove("hidden");
 
+      // refrescar tarjetas y disponibilidad de mesas
       ordersList.innerHTML = "";
       await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
-      await cargarMesasSelect(); // refrescar disponibilidad
+      await cargarMesasSelect();
     } catch (err) {
       if (err && err.message !== "VALIDATION") {
         showAlert("error", err.message || "No se pudo guardar el pedido");
@@ -1102,23 +1346,52 @@ async function init() {
     }
   });
 
+  // 7) Reapertura automática del formulario (volviste de menu.html o #new)
   if (sessionStorage.getItem(K_OPEN_FORM) === "1" || location.hash === "#new") {
     newOrderForm.classList.remove("hidden");
     ordersList.classList.add("hidden");
     newOrderBtn.classList.add("hidden");
-    orderTime.value = new Date().toLocaleDateString("es-ES");
+    if (orderTime) orderTime.value = new Date().toLocaleDateString("es-ES");
+
     restoreFormSnapshot();
-    restoreWaiter(waiterSelect);
     renderSeleccionUI();
+
+    // Restaurar modo edición si venimos de menu.html
+    const storedEditId  = Number(sessionStorage.getItem(K_EDIT_ID)  || "");
+    const storedEmpId   = Number(sessionStorage.getItem(K_EDIT_EMP)  || "");
+    const storedMesaId  = Number(sessionStorage.getItem(K_EDIT_MESA) || "");
+
+    if (Number.isFinite(storedEditId) && storedEditId > 0) {
+      editingId = storedEditId;
+
+      const saveBtn2 = $("#save-order-btn");
+      if (saveBtn2) saveBtn2.textContent = "Actualizar pedido";
+
+      await cargarEmpleados(waiterSelect, { initialId: storedEmpId || undefined });
+      await cargarMesasSelect({ allowCurrentId: storedMesaId || undefined });
+
+      if (storedMesaId && tableSelect) {
+        tableSelect.value = String(storedMesaId);
+        tableSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        if (tableSelect._fancy?.sync) tableSelect._fancy.sync();
+      }
+    } else {
+      // No hay edición: cargar selects normales
+      await cargarEmpleados(waiterSelect);
+      await cargarMesasSelect();
+    }
+
     sessionStorage.removeItem(K_OPEN_FORM);
   } else {
     renderSeleccionUI();
   }
 
+  // 8) Skin
   applyModernSkin();
 }
 
-// Marca un campo inválido visualmente (evita ReferenceError)
+
+// Marca un campo inválido visualmente
 function markInvalid(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -1131,4 +1404,3 @@ function formatDateTimeLocal(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
-
