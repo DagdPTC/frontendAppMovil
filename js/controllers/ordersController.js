@@ -11,7 +11,7 @@ import {
 } from "../services/ordersService.js";
 import { getPlatillos } from "../services/menuService.js";
 
-const $  = (s, r = document) => r.querySelector(s);
+const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
 let editingId = null;
@@ -20,27 +20,33 @@ let editingOriginalLinesByPlatillo = new Map();
 // máximo idDetalle encontrado en el pedido al iniciar edición
 let editingMaxIdDetalle = 0;
 
-
-
-const K_EDIT_ID   = "order_editing_id";
-const K_EDIT_EMP  = "order_editing_emp";
+const K_EDIT_ID = "order_editing_id";
+const K_EDIT_EMP = "order_editing_emp";
 const K_EDIT_MESA = "order_editing_mesa";
 
-
-const K_SEL       = "ord_dishes_sel";
+const K_SEL = "ord_dishes_sel";
 const K_OPEN_FORM = "abrirFormularioPedido";
-const K_CLIENTE   = "clienteTemporal";
-const K_MESA      = "mesaTemporal";
-const K_WAITER    = "waiterTemporal";
+const K_CLIENTE = "clienteTemporal";
+const K_MESA = "mesaTemporal";
+const K_WAITER = "waiterTemporal";
 
-const LOCK_KEY    = "mesas_locked_by_orders"; // para bloquear cambios en pantallas de Mesas
+const LOCK_KEY = "mesas_locked_by_orders"; // para bloquear cambios en pantallas de Mesas
 
 const PILL_NEUTRAL = "estado-pill text-xs px-2 py-1 rounded bg-gray-100 text-gray-700 capitalize";
 
-let MAP_ESTADOS   = new Map();  // id -> {id, nombre}
+let MAP_ESTADOS = new Map();  // id -> {id, nombre}
 let ESTADOS_ORDER = [];         // [{id,nombre}] ordenado por id
 let MAP_PLATILLOS = new Map();
 let MAP_EMPLEADOS = new Map();
+// Cache para filtrar/ordenar sin volver a pedir al backend
+let ORDERS_CACHE = [];         // pedidos normalizados (fromApi)
+// Vista global de tarjetas: "compact" por defecto
+let VIEW_MODE = (() => {
+  try {
+    const s = JSON.parse(sessionStorage.getItem("orders_filters_v1") || "{}");
+    return s?.vista || "compact";
+  } catch { return "compact"; }
+})();
 
 /* ===========================================================
    FANCY SELECT (chips + búsqueda + animación, accesible)
@@ -215,28 +221,35 @@ function upgradeSelect(nativeSelect, opts = {}) {
    =========================================================== */
 function applyModernSkin() {
   const form = document.getElementById("new-order-form");
-  if (form) form.classList.add("rounded-2xl","bg-white","border","border-gray-200","shadow-md","p-4","md:p-6","animate-[fadeIn_.25s_ease]");
-  const list = document.getElementById("orders-list");
-  if (list) list.classList.add("grid","gap-4","md:grid-cols-2","xl:grid-cols-3");
+  if (form) form.classList.add("rounded-2xl", "bg-white", "border", "border-gray-200", "shadow-md", "p-4", "md:p-6", "animate-[fadeIn_.25s_ease]");
 
-  [["new-order-btn","bg-blue-600 hover:bg-blue-700"],
-   ["save-order-btn","bg-blue-600 hover:bg-blue-700"],
-   ["back-to-orders","bg-gray-200 hover:bg-gray-300"],
-   ["add-dishes-btn","bg-emerald-500 hover:bg-emerald-600"]]
-  .forEach(([id, cls]) => {
-    const b = document.getElementById(id);
-    if (b) {
-      b.classList.add(...("text-white rounded-xl px-4 py-2 transition shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500".split(" ")));
-      cls.split(" ").forEach(c => b.classList.add(c));
-      b.addEventListener("click", () => {
-        const s = document.createElement("span");
-        s.className = "absolute inset-0 rounded-xl animate-[ping_.6s_ease-out] bg-white/30 pointer-events-none";
-        b.style.position = "relative";
-        b.appendChild(s);
-        setTimeout(()=>s.remove(),600);
-      });
-    }
-  });
+  const list = document.getElementById("orders-list");
+  if (list) {
+    // quitamos cualquier grid previo
+    list.classList.remove("md:grid-cols-2", "xl:grid-cols-3", "grid", "items-start", "orders-auto-grid");
+    // activamos masonry por columnas
+    list.classList.add("orders-masonry");
+    list.style.removeProperty("--card-min");
+  }
+
+  [["new-order-btn", "bg-blue-600 hover:bg-blue-700"],
+   ["save-order-btn", "bg-blue-600 hover:bg-blue-700"],
+   ["back-to-orders", "bg-gray-200 hover:bg-gray-300"],
+   ["add-dishes-btn", "bg-emerald-500 hover:bg-emerald-600"]]
+    .forEach(([id, cls]) => {
+      const b = document.getElementById(id);
+      if (b) {
+        b.classList.add(...("text-white rounded-xl px-4 py-2 transition shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500".split(" ")));
+        cls.split(" ").forEach(c => b.classList.add(c));
+        b.addEventListener("click", () => {
+          const s = document.createElement("span");
+          s.className = "absolute inset-0 rounded-xl animate-[ping_.6s_ease-out] bg-white/30 pointer-events-none";
+          b.style.position = "relative";
+          b.appendChild(s);
+          setTimeout(() => s.remove(), 600);
+        });
+      }
+    });
 
   const style = document.createElement("style");
   style.textContent = `@keyframes fadeIn { from {opacity:0; transform: translateY(4px)} to {opacity:1; transform:none} }`;
@@ -246,6 +259,27 @@ function applyModernSkin() {
 /* =========================
    ALERTAS (info / error / success)
    ========================= */
+
+// Grid automático (legacy, no lo usamos ya como masonry)
+(function ensureAutoGrid() {
+  if (document.getElementById("orders-auto-grid-styles")) return;
+  const st = document.createElement("style");
+  st.id = "orders-auto-grid-styles";
+  st.textContent = `
+    #orders-list.orders-auto-grid{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(var(--card-min, 300px), 1fr));
+      gap: 1rem;
+      align-items: start;
+      overflow-anchor: none;
+    }
+    @media (max-width: 420px){
+      #orders-list.orders-auto-grid{ grid-template-columns: 1fr; }
+    }
+  `;
+  document.head.appendChild(st);
+})();
+
 function ensureAlertHost() {
   let host = document.getElementById("alerts-host");
   if (!host) {
@@ -326,6 +360,92 @@ function clearSnapshots() {
   sessionStorage.removeItem(K_WAITER);
   sessionStorage.removeItem(K_OPEN_FORM);
 }
+
+// Evita que el viewport "salte" cuando cambia la altura
+function withScrollFreeze(fn) {
+  const x = window.scrollX, y = window.scrollY;
+  try { fn(); } finally {
+    requestAnimationFrame(() => window.scrollTo(x, y));
+  }
+}
+
+function throttle(fn, wait = 150) {
+  let t, last = 0;
+  return (...a) => {
+    const now = Date.now();
+    if (now - last >= wait) { last = now; fn(...a); }
+    else { clearTimeout(t); t = setTimeout(() => { last = Date.now(); fn(...a); }, wait - (now - last)); }
+  };
+}
+const recalcExpandedHeights = throttle(() => {
+  $$('.o-card .o-extra.expanded').forEach(el => {
+    el.style.maxHeight = el.scrollHeight + 'px';
+  });
+}, 120);
+
+window.addEventListener('resize', recalcExpandedHeights);
+window.addEventListener('load', recalcExpandedHeights);
+
+/* =========================
+   Masonry por columnas (NO grid-auto-rows)
+   ========================= */
+(function ensureMasonryStyles() {
+  if (document.getElementById("orders-masonry-styles")) return;
+  const st = document.createElement("style");
+  st.id = "orders-masonry-styles";
+  st.textContent = `
+    /* Contenedor: multi-column. Al crecer la pantalla, caben más columnas automáticamente */
+    #orders-list.orders-masonry{
+      display: block;
+      column-gap: 16px;
+      column-width: 300px; /* ↓ baja o sube este número para variar cuántas por fila */
+      overflow-anchor: none;
+      padding-top: 4px;
+    }
+    @media (min-width: 1400px){
+      #orders-list.orders-masonry{ column-width: 340px; column-gap: 20px; }
+    }
+    @media (max-width: 768px){
+      #orders-list.orders-masonry{ column-width: 100%; column-gap: 14px; }
+    }
+
+    /* Cada tarjeta ocupa SU columna, no se parte ni se estira */
+    #orders-list.orders-masonry > .o-card{
+      display: block;
+      width: auto;
+      break-inside: avoid;
+      -webkit-column-break-inside: avoid;
+      margin: 0 0 16px;
+      vertical-align: top;
+    }
+
+    /* Animación del expandible */
+    .o-extra{
+      overflow: hidden;
+      transition: max-height .32s ease, opacity .20s ease;
+      will-change: max-height;
+    }
+    .o-extra.collapsed{ max-height:0; opacity:0; }
+    .o-extra.expanded{ opacity:1; }
+  `;
+  document.head.appendChild(st);
+})();
+
+/* (ELIMINADO) — No usamos grid-auto-rows ni spans personalizados */
+
+/* =========================
+   Colores / helpers
+   ========================= */
+function accentForEstado(nombre) {
+  const n = (nombre || "").toLowerCase();
+  if (n.includes("pend")) return "#F59E0B"; // amber
+  if (n.includes("prep") || n.includes("proces")) return "#3B82F6"; // blue
+  if (n.includes("entreg")) return "#10B981"; // emerald
+  if (n.includes("pag")) return "#16A34A"; // green
+  if (n.includes("cancel") || n.includes("anul")) return "#EF4444"; // red
+  return "#6B7280"; // gray
+}
+
 function resetOrderForm() {
   const name = $("#customer-name");
   const table = $("#table-select");
@@ -363,13 +483,12 @@ window.isMesaLockedByOrder = (idMesa) => getLockedSet().has(String(idMesa));
 
 // ---- API Mesa (best-effort; ajusta si tu backend difiere) ----
 const API_HOST = "http://localhost:8080";
-
 async function tryUpdateMesaEstado(idMesa, idEstadoMesa) {
   const url = `${API_HOST}/apiMesa/estado/${idMesa}/${idEstadoMesa}`;
   const res = await fetch(url, { method: "PATCH" });
   return res.ok;
 }
-async function ocuparMesa(idMesa)  { await tryUpdateMesaEstado(idMesa, 2); } // Ocupada
+async function ocuparMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 2); } // Ocupada
 async function liberarMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 1); } // Disponible
 
 /* =========================
@@ -385,7 +504,7 @@ async function cargarEstadosYSelect() {
     }).filter(x => Number.isFinite(x.id) && x.nombre)
       .map(x => [x.id, x])
   );
-  ESTADOS_ORDER = Array.from(MAP_ESTADOS.values()).sort((a,b)=>a.id - b.id);
+  ESTADOS_ORDER = Array.from(MAP_ESTADOS.values()).sort((a, b) => a.id - b.id);
 
   const selEstado = $("#status-select");
   if (selEstado) {
@@ -455,12 +574,6 @@ async function cargarCatalogos() {
 /* =========================
    Mesero (autocompletado + bloqueado)
    ========================= */
-// Autocompleta el mesero con un empleado REAL de la API y bloquea el select.
-// Si existe sessionStorage.ord_user con un id válido, lo usa; si no, usa el primer empleado.
-// Autocompleta el mesero con un empleado REAL de la API y bloquea el select.
-// Si pasas { initialId }, lo usa (editar). Si no, usa ord_user o el primero de la API.
-// Autocompleta el mesero con un empleado REAL de la API y bloquea el select.
-// Si pasas { initialId }, lo usa (editar). Si no, usa ord_user o el primero de la API.
 async function cargarEmpleados(waiterSelect, opts = {}) {
   if (!waiterSelect) return;
   const { initialId = null } = opts;
@@ -484,18 +597,18 @@ async function cargarEmpleados(waiterSelect, opts = {}) {
     try {
       const user = JSON.parse(sessionStorage.getItem("ord_user") || "null");
       if (user && Number.isFinite(Number(user.id))) preferredId = Number(user.id);
-    } catch {}
+    } catch { }
   }
   if (!preferredId && empleados.length) preferredId = Number(empleados[0].id ?? empleados[0].Id);
 
-  // Etiqueta legible (EmpleadoDTO no trae nombre)
+  // Etiqueta legible
   let label = `Empleado #${preferredId || "-"}`;
   try {
     const user = JSON.parse(sessionStorage.getItem("ord_user") || "null");
     if (user && Number(user.id) === preferredId) {
       label = `${user.nombre || label}${user.username ? " — " + user.username : ""}`;
     }
-  } catch {}
+  } catch { }
 
   waiterSelect.innerHTML = "";
   const opt = document.createElement("option");
@@ -510,9 +623,6 @@ async function cargarEmpleados(waiterSelect, opts = {}) {
     "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 text-sm md:text-base bg-gray-100 shadow-sm cursor-not-allowed";
   if (typeof upgradeSelect === "function") upgradeSelect(waiterSelect, { placeholder: "Mesero" });
 }
-
-
-
 
 /* =========================
    Mesas (select con estado)
@@ -536,13 +646,13 @@ function nombreEstadoMesa(m) {
     m.estado ?? ""
   ).toString().toLowerCase();
   if (raw.includes("dispon")) return "disponible";
-  if (raw.includes("ocup"))   return "ocupada";
+  if (raw.includes("ocup")) return "ocupada";
   if (raw.includes("reserv")) return "reservada";
-  if (raw.includes("limp"))   return "limpieza";
+  if (raw.includes("limp")) return "limpieza";
   return "desconocido";
 }
 function tituloEstado(s) {
-  const t = String(s||"").toLowerCase();
+  const t = String(s || "").toLowerCase();
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 function idMesaFrom(m) {
@@ -551,10 +661,7 @@ function idMesaFrom(m) {
 function nombreMesaFrom(m) {
   return String(m?.nomMesa ?? m?.numero ?? m?.numMesa ?? idMesaFrom(m) ?? "?");
 }
-
-// Normaliza el estado de la mesa leyendo varios posibles campos
 function getEstadoMesaNormalized(m) {
-  // 1) Numérico (catálogo típico: 1=Disponible, 2=Ocupada, 3=Reservada, 4=Limpieza)
   const idE = Number(
     m.idEstadoMesa ?? m.IdEstadoMesa ??
     (m.estadoMesa && (m.estadoMesa.id ?? m.estadoMesa.Id)) ??
@@ -566,8 +673,6 @@ function getEstadoMesaNormalized(m) {
     if (idE === 3) return "reservada";
     if (idE === 4) return "limpieza";
   }
-
-  // 2) Texto (por si el backend manda el nombre del estado)
   const raw = (
     m.nomEstadoMesa ?? m.nomEstado ??
     (m.estadoMesa && (m.estadoMesa.nomEstado ?? m.estadoMesa.nombre ?? m.estadoMesa.estado)) ??
@@ -576,27 +681,14 @@ function getEstadoMesaNormalized(m) {
   ).toString().toLowerCase();
 
   if (raw.includes("dispon")) return "disponible";
-  if (raw.includes("ocup"))   return "ocupada";
+  if (raw.includes("ocup")) return "ocupada";
   if (raw.includes("reserv")) return "reservada";
-  if (raw.includes("limp"))   return "limpieza";
+  if (raw.includes("limp")) return "limpieza";
 
   return "desconocido";
 }
 
-
-// === RUTA FIJA y tamaño permitido por tu backend (size <= 50) ===
-// Ruta fija de tu backend (size <= 50) y estado normalizado
-// Ruta fija de tu backend (size <= 50) y estado normalizado
-// Carga mesas desde la API y pinta el select con el estado REAL (no inventado)
-// Carga mesas mostrando el ESTADO REAL desde /apiEstadoMesa y bloquea las no disponibles
-// Carga mesas con ESTADO REAL: cruza Mesa + EstadoMesa + Pedido + EstadoPedido.
-// Solo habilita las mesas cuyo estado final quede en "Disponible".
-// Carga mesas con el estado REAL; habilita solo "Disponible".
-// Si pasas { allowCurrentId }, esa mesa se muestra habilitada como "(actual)" para poder conservarla al editar.
-// Carga mesas con estado REAL: Mesa + EstadoMesa + Pedido + EstadoPedido.
-// Habilita solo "Disponible". Si allowCurrentId coincide, permite mantenerla aunque esté ocupada (al editar).
-// Carga mesas con estado REAL: Mesa + EstadoMesa + Pedido + EstadoPedido.
-// Habilita solo "Disponible". Si allowCurrentId coincide, permite mantenerla aunque esté ocupada (al editar).
+// Carga mesas con estado real
 async function cargarMesasSelect(opts = {}) {
   const { allowCurrentId = null } = opts;
   const sel = document.getElementById("table-select");
@@ -606,10 +698,10 @@ async function cargarMesasSelect(opts = {}) {
     "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base bg-white shadow-sm";
   sel.innerHTML = `<option value="" disabled selected>Seleccione una mesa disponible…</option>`;
 
-  const urlMesas   = `${API_HOST}/apiMesa/getDataMesa?page=0&size=50`;
-  const urlEM      = `${API_HOST}/apiEstadoMesa/getDataEstadoMesa?page=0&size=50`;
-  const urlPed     = `${API_HOST}/apiPedido/getDataPedido?page=0&size=50`;
-  const urlEP      = `${API_HOST}/apiEstadoPedido/getDataEstadoPedido?page=0&size=50`;
+  const urlMesas = `${API_HOST}/apiMesa/getDataMesa?page=0&size=50`;
+  const urlEM = `${API_HOST}/apiEstadoMesa/getDataEstadoMesa?page=0&size=50`;
+  const urlPed = `${API_HOST}/apiPedido/getDataPedido?page=0&size=50`;
+  const urlEP = `${API_HOST}/apiEstadoPedido/getDataEstadoPedido?page=0&size=50`;
 
   const getId = (o) => Number(o.id ?? o.Id);
   const nomMesa = (m) => String(m.nomMesa ?? `Mesa ${getId(m)}`);
@@ -618,7 +710,7 @@ async function cargarMesasSelect(opts = {}) {
   const nomEstadoPedido = (e) => String(e.nomEstado ?? e.nombre ?? "").trim();
   const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s);
 
-  let mesas=[], estadosMesa=[], pedidos=[], estadosPed=[];
+  let mesas = [], estadosMesa = [], pedidos = [], estadosPed = [];
   try {
     const [rM, rEM, rP, rEP] = await Promise.all([fetch(urlMesas), fetch(urlEM), fetch(urlPed), fetch(urlEP)]);
     if (!rM.ok || !rEM.ok || !rP.ok || !rEP.ok) throw new Error("HTTP error");
@@ -634,9 +726,8 @@ async function cargarMesasSelect(opts = {}) {
   }
 
   const MAP_ID_ESTADO_MESA_NOMBRE = new Map(estadosMesa.map(e => [getId(e), nomEstadoMesa(e)]));
-  const MAP_ID_ESTADO_PED_NOMBRE  = new Map(estadosPed.map(e => [getId(e), nomEstadoPedido(e)]));
+  const MAP_ID_ESTADO_PED_NOMBRE = new Map(estadosPed.map(e => [getId(e), nomEstadoPedido(e)]));
 
-  // Detectar "Disponible" por nombre del catálogo de MESA (no por hardcode)
   let idDisponible = null;
   for (const e of estadosMesa) { if (nomEstadoMesa(e).toLowerCase().includes("dispon")) { idDisponible = getId(e); break; } }
   if (idDisponible == null) {
@@ -645,15 +736,13 @@ async function cargarMesasSelect(opts = {}) {
     return;
   }
 
-  // Estados de pedido cerrados (no ocupan mesa)
   const esPedidoCerrado = (nombre) => {
     const s = (nombre || "").toLowerCase();
     return s.includes("pag") || s.includes("final") || s.includes("cancel") ||
-           s.includes("cerr") || s.includes("entreg") || s.includes("complet") ||
-           s.includes("rechaz") || s.includes("anul");
+      s.includes("cerr") || s.includes("entreg") || s.includes("complet") ||
+      s.includes("rechaz") || s.includes("anul");
   };
 
-  // Mesas con pedido ACTIVO
   const mesasConPedidoActivo = new Set(
     pedidos
       .filter(p => !esPedidoCerrado(MAP_ID_ESTADO_PED_NOMBRE.get(Number(p.idEstadoPedido ?? p.IdEstadoPedido)) || ""))
@@ -670,7 +759,6 @@ async function cargarMesasSelect(opts = {}) {
     const idEst = idEstMesa(m);
     const nomEst = MAP_ID_ESTADO_MESA_NOMBRE.get(idEst) || "Desconocido";
 
-    // Estado efectivo: si hay pedido activo, consideramos Ocupada
     const estadoEfectivo = mesasConPedidoActivo.has(id) ? "Ocupada" : nomEst;
     let habilitada = (!mesasConPedidoActivo.has(id)) && (idEst === idDisponible);
     let etiqueta = `${nombre} — ${cap(estadoEfectivo)}`;
@@ -699,16 +787,8 @@ async function cargarMesasSelect(opts = {}) {
   if (typeof upgradeSelect === "function") upgradeSelect(sel, { placeholder: "Mesa" });
 }
 
-
-
-
-
-
-
-
-
 /* =========================
-   Normalizador pedido UI — AJUSTADO a items[] con fallback legacy
+   Normalizador pedido UI
    ========================= */
 function fromApi(p) {
   const id = Number(p.id ?? p.Id ?? p.idPedido ?? p.ID);
@@ -722,13 +802,13 @@ function fromApi(p) {
   if (Array.isArray(p.items) && p.items.length) {
     platillos = p.items.map(it => {
       const idPlat = Number(it.idPlatillo ?? it.IdPlatillo ?? it.id ?? it.Id);
-      const cant   = Number(it.cantidad ?? it.Cantidad ?? 1);
-      const pu     = (it.precioUnitario ?? it.PrecioUnitario);
-      const info   = MAP_PLATILLOS.get(idPlat);
-      const idDet  = Number(it.idDetalle ?? it.IdDetalle ?? it.linea ?? it.Linea ?? 0);
+      const cant = Number(it.cantidad ?? it.Cantidad ?? 1);
+      const pu = (it.precioUnitario ?? it.PrecioUnitario);
+      const info = MAP_PLATILLOS.get(idPlat);
+      const idDet = Number(it.idDetalle ?? it.IdDetalle ?? it.linea ?? it.Linea ?? 0);
       return {
         idPlatillo: idPlat,
-        idDetalle:  Number.isFinite(idDet) ? idDet : undefined,
+        idDetalle: Number.isFinite(idDet) ? idDet : undefined,
         nombre: info?.nomPlatillo ?? `#${idPlat}`,
         cantidad: cant,
         precio: Number(pu ?? info?.precio ?? 0)
@@ -736,11 +816,11 @@ function fromApi(p) {
     });
   } else {
     const idPlat = Number(p.idPlatillo ?? p.IdPlatillo ?? 0);
-    const cant   = Number(p.cantidad ?? p.Cantidad ?? 1);
-    const info   = MAP_PLATILLOS.get(idPlat);
+    const cant = Number(p.cantidad ?? p.Cantidad ?? 1);
+    const info = MAP_PLATILLOS.get(idPlat);
     platillos = idPlat ? [{
       idPlatillo: idPlat,
-      idDetalle:  undefined,
+      idDetalle: undefined,
       nombre: info?.nomPlatillo ?? (p.platillo?.nomPlatillo ?? p.nomPlatillo ?? "Platillo"),
       cantidad: cant,
       precio: Number(info?.precio ?? 0)
@@ -749,8 +829,8 @@ function fromApi(p) {
 
   const subtotalCalc = platillos.reduce((acc, x) => acc + (Number(x.precio) || 0) * (Number(x.cantidad) || 0), 0);
   const subtotal = Number((p.subtotal ?? p.Subtotal ?? subtotalCalc) ?? 0);
-  const propina  = Number(p.propina ?? p.Propina ?? +(subtotal * 0.10).toFixed(2));
-  const total    = Number(p.totalPedido ?? p.TotalPedido ?? +(subtotal + propina).toFixed(2));
+  const propina = Number(p.propina ?? p.Propina ?? +(subtotal * 0.10).toFixed(2));
+  const total = Number(p.totalPedido ?? p.TotalPedido ?? +(subtotal + propina).toFixed(2));
 
   return {
     id,
@@ -761,60 +841,485 @@ function fromApi(p) {
     Estado: estadoNombre,
     Platillos: platillos,
     _subtotal: subtotal,
-    _propina:  propina,
-    _total:    total,
+    _propina: propina,
+    _total: total,
 
     idMesa,
     idEmpleado: Number(p.idEmpleado ?? p.IdEmpleado ?? 0),
     idEstadoPedido: estadoId,
-    idPlatillo: Number(p.idPlatillo ?? p.IdPlatillo ?? 0), // legacy
+    idPlatillo: Number(p.idPlatillo ?? p.IdPlatillo ?? 0),
     Observaciones: (p.observaciones ?? p.Observaciones ?? "").toString()
   };
 }
 
+function getUniqueMesasFromCache() {
+  const set = new Set(ORDERS_CACHE.map(o => Number(o.Mesa || o.idMesa || 0)).filter(Boolean));
+  return Array.from(set).sort((a, b) => a - b);
+}
+
+(function ensureCardUX() {
+  if (document.getElementById("orders-card-ux")) return;
+  const st = document.createElement("style");
+  st.id = "orders-card-ux";
+  st.textContent = `
+  .o-card{position:relative; overflow:hidden; border-radius:16px}
+  .o-card .o-stripe{position:absolute; top:0; left:0; right:0; height:6px; background:var(--accent,#6366F1)}
+  .o-head{display:flex; align-items:flex-start; justify-content:space-between; gap:.5rem}
+  .o-toggle{display:inline-flex; align-items:center; gap:.35rem; border:1px solid #e5e7eb; background:#fff;
+            border-radius:9999px; padding:.25rem .55rem; font-size:.8rem}
+  .o-toggle .chev{transition:transform .18s ease}
+  .o-extra{overflow:hidden; transition:max-height .28s ease, opacity .2s ease}
+  .o-extra.collapsed{max-height:0; opacity:0}
+  .o-extra.expanded{opacity:1}
+  .o-meta{display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.5rem}
+  @media (max-width:640px){ .o-meta{grid-template-columns:repeat(2,minmax(0,1fr));} }
+  @media (max-width:380px){
+    .o-card{border-radius:14px}
+    .o-card.p-4{padding:12px}
+    .o-meta{grid-template-columns:1fr}
+    .of-search{padding:.5rem .75rem}
+    .of-filter-btn{width:36px; height:36px}
+    .fs-control{min-height:36px}
+  }
+  `;
+  document.head.appendChild(st);
+})();
+
+/* Barra de filtros */
+function ensureFilterBar() {
+  const list = document.getElementById("orders-list");
+  if (!list) return;
+  let bar = document.getElementById("orders-filters");
+  if (bar) return bar;
+
+  const K_FILTROS = "orders_filters_v1";
+  const saved = (() => { try { return JSON.parse(sessionStorage.getItem(K_FILTROS) || "{}"); } catch { return {}; } })();
+
+  const estadosOpts = (ESTADOS_ORDER || []).map(e => `<option value="${e.id}">${e.nombre}</option>`).join("");
+  const mesasOpts = (() => {
+    const set = new Set(ORDERS_CACHE.map(o => Number(o.Mesa || o.idMesa || 0)).filter(Boolean));
+    return Array.from(set).sort((a, b) => a - b).map(m => `<option value="${m}">${m}</option>`).join("");
+  })();
+
+  bar = document.createElement("div");
+  bar.id = "orders-filters";
+  bar.className = "of-bar";
+
+  bar.innerHTML = `
+    <div class="of-search">
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 5 1.5-1.5-5-5zM9.5 14A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14"/></svg>
+      <input id="f-q" type="text" placeholder="Buscar por cliente o platillo…" />
+      <button id="f-open" class="of-filter-btn" title="Filtros">
+        <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M10 18h4v-2h-4v2zm-7-7v2h18v-2H3zM6 5v2h12V5H6z"/></svg>
+      </button>
+    </div>
+
+    <div id="f-overlay" class="of-overlay"></div>
+    <div id="f-panel" class="of-panel">
+      <div class="p-4 md:p-5">
+        <div class="flex items-center justify-between mb-3">
+          <div class="text-base font-semibold">Filtros</div>
+          <button id="f-close" class="o-toggle border rounded-lg px-3 py-1.5 bg-gray-50 hover:bg-gray-100">Cerrar ✕</button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div>
+            <label class="text-xs text-gray-500">Estado</label>
+            <select id="f-estado" class="w-full rounded-lg border border-gray-300 px-3 py-2">
+              <option value="">Todos</option>${estadosOpts}
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-gray-500">Mesa</label>
+            <select id="f-mesa" class="w-full rounded-lg border border-gray-300 px-3 py-2">
+              <option value="">Todas</option>${mesasOpts}
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-gray-500">Vista</label>
+            <select id="f-vista" class="w-full rounded-lg border border-gray-300 px-3 py-2">
+              <option value="full">Completa</option>
+              <option value="compact" selected>Compacta</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-gray-500">Desde</label>
+            <input id="f-desde" type="date" class="w-full rounded-lg border border-gray-300 px-3 py-2">
+          </div>
+          <div>
+            <label class="text-xs text-gray-500">Hasta</label>
+            <input id="f-hasta" type="date" class="w-full rounded-lg border border-gray-300 px-3 py-2">
+          </div>
+          <div class="sm:col-span-2 lg:col-span-3 flex justify-end gap-2">
+            <button id="f-clear" class="rounded-lg bg-gray-100 hover:bg-gray-200 px-3 py-2">Limpiar</button>
+            <button id="f-apply" class="rounded-lg bg-blue-600 hover:bg-blue-700 text-white px-4 py-2">Aplicar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  list.insertAdjacentElement("beforebegin", bar);
+
+  const sEstado = bar.querySelector("#f-estado");
+  const sMesa = bar.querySelector("#f-mesa");
+  const sVista = bar.querySelector("#f-vista");
+  upgradeSelect?.(sEstado, { placeholder: "Estado" });
+  upgradeSelect?.(sMesa, { placeholder: "Mesa" });
+  upgradeSelect?.(sVista, { placeholder: "Vista" });
+
+  if (saved.q) bar.querySelector("#f-q").value = saved.q;
+  if (saved.estado && sEstado.querySelector(`option[value="${saved.estado}"]`)) sEstado.value = saved.estado, sEstado.dispatchEvent(new Event("change", { bubbles: true }));
+  if (saved.mesa && sMesa.querySelector(`option[value="${saved.mesa}"]`)) sMesa.value = saved.mesa, sMesa.dispatchEvent(new Event("change", { bubbles: true }));
+  if (saved.vista) sVista.value = saved.vista, sVista.dispatchEvent(new Event("change", { bubbles: true }));
+  if (saved.desde) bar.querySelector("#f-desde").value = saved.desde;
+  if (saved.hasta) bar.querySelector("#f-hasta").value = saved.hasta;
+
+  const overlay = bar.querySelector("#f-overlay");
+  const panel = bar.querySelector("#f-panel");
+  const open = () => { overlay.classList.add("open"); panel.classList.add("open"); };
+  const close = () => { overlay.classList.remove("open"); panel.classList.remove("open"); };
+  bar.querySelector("#f-open").addEventListener("click", open);
+  overlay.addEventListener("click", close);
+  bar.querySelector("#f-close").addEventListener("click", close);
+
+  const saveState = () => {
+    const st = {
+      q: bar.querySelector("#f-q").value.trim(),
+      estado: sEstado.value || "",
+      mesa: sMesa.value || "",
+      vista: sVista.value || "compact",
+      desde: bar.querySelector("#f-desde").value || "",
+      hasta: bar.querySelector("#f-hasta").value || ""
+    };
+    sessionStorage.setItem("orders_filters_v1", JSON.stringify(st));
+    VIEW_MODE = st.vista || "full";
+  };
+
+  const rerender = () => {
+    saveState();
+    const container = document.getElementById("orders-list");
+    renderOrdersList(container, agregarTarjetaPedido);
+  };
+
+  bar.querySelector("#f-q").addEventListener("input", () => rerender());
+  bar.querySelector("#f-apply").addEventListener("click", () => { rerender(); close(); });
+  bar.querySelector("#f-clear").addEventListener("click", () => {
+    bar.querySelector("#f-q").value = "";
+    sEstado.value = ""; sEstado.dispatchEvent(new Event("change", { bubbles: true }));
+    sMesa.value = ""; sMesa.dispatchEvent(new Event("change", { bubbles: true }));
+    sVista.value = "full"; sVista.dispatchEvent(new Event("change", { bubbles: true }));
+    bar.querySelector("#f-desde").value = "";
+    bar.querySelector("#f-hasta").value = "";
+    rerender();
+  });
+
+  sVista.addEventListener("change", rerender);
+  return bar;
+}
+
+function aplicarFiltros(arr) {
+  const bar = document.getElementById("orders-filters");
+  if (!bar) return arr;
+
+  const q = bar.querySelector("#f-q").value.trim().toLowerCase();
+  const estado = bar.querySelector("#f-estado").value;
+  const mesa = bar.querySelector("#f-mesa").value;
+  const desde = bar.querySelector("#f-desde").value;
+  const hasta = bar.querySelector("#f-hasta").value;
+
+  return arr.filter(p => {
+    if (q) {
+      const hay = (p.Cliente || "").toLowerCase().includes(q)
+        || (p.Platillos || []).some(x => (x.nombre || "").toLowerCase().includes(q));
+      if (!hay) return false;
+    }
+    if (estado && Number(estado) !== Number(p.idEstadoPedido)) return false;
+    if (mesa && String(mesa) !== String(p.Mesa || p.idMesa || "")) return false;
+
+    if (desde) {
+      const d = new Date((p.Hora || "").replace(" ", "T"));
+      const min = new Date(desde + "T00:00:00");
+      if (isNaN(d) || d < min) return false;
+    }
+    if (hasta) {
+      const d = new Date((p.Hora || "").replace(" ", "T"));
+      const max = new Date(hasta + "T23:59:59");
+      if (isNaN(d) || d > max) return false;
+    }
+    return true;
+  });
+}
+
+function renderOrdersList(container, onAddCard) {
+  const list = aplicarFiltros(ORDERS_CACHE);
+  container.innerHTML = "";
+
+  if (!list.length) {
+    container.innerHTML = `
+      <div class="w-full py-12 flex items-center justify-center">
+        <div class="text-center text-gray-500">
+          <div class="text-lg font-medium mb-1">Sin resultados</div>
+          <div class="text-sm">Ajusta los filtros para ver pedidos.</div>
+        </div>
+      </div>`;
+    return;
+  }
+
+  list.forEach(p => { try { onAddCard(p, container); } catch { } });
+
+  requestAnimationFrame(() => {
+    recalcExpandedHeights();
+  });
+}
+
+// === Helpers visuales para las tarjetas ===
+function fmtMoney(n) { return Number(n || 0).toFixed(2); }
+function fmtFechaCorta(s) {
+  if (!s) return "-";
+  try {
+    const d = (s instanceof Date) ? s : new Date(String(s).replace(" ", "T"));
+    if (Number.isNaN(d.getTime())) return String(s);
+    return d.toLocaleString("es-ES", { dateStyle: "medium", timeStyle: "short" });
+  } catch { return String(s); }
+}
+function getEmpleadoNombre(idEmp) {
+  const emp = MAP_EMPLEADOS.get(Number(idEmp));
+  return emp?.nombre || (idEmp ? `Empleado #${idEmp}` : "—");
+}
+function badgeColorForEstado(nombre) {
+  const n = (nombre || "").toLowerCase();
+  if (n.includes("pend")) return "bg-yellow-100 text-yellow-800 ring-yellow-200";
+  if (n.includes("prep") || n.includes("proces")) return "bg-blue-100 text-blue-800 ring-blue-200";
+  if (n.includes("entreg")) return "bg-emerald-100 text-emerald-800 ring-emerald-200";
+  if (n.includes("pag")) return "bg-green-100 text-green-800 ring-green-200";
+  if (n.includes("cancel") || n.includes("anul")) return "bg-red-100 text-red-800 ring-red-200";
+  return "bg-gray-100 text-gray-700 ring-gray-200";
+}
+
+(function ensureCardStyles() {
+  const ID = "orders-card-extras";
+  if (document.getElementById(ID)) return;
+  const st = document.createElement("style");
+  st.id = ID;
+  st.textContent = `
+    .o-card{position:relative;overflow:hidden;border-radius:16px;background:#fff;
+      border:1px solid #e5e7eb;box-shadow:0 8px 24px rgba(0,0,0,.08);
+      transition:box-shadow .2s ease, transform .2s ease}
+    .o-card:hover{box-shadow:0 16px 40px rgba(0,0,0,.12); transform:translateY(-2px)}
+    .o-stripe{position:absolute;top:0;left:0;right:0;height:6px;background:var(--accent,#6366F1)}
+    .o-badge{display:inline-flex;align-items:center;gap:.4rem;padding:.15rem .5rem;border-radius:9999px;
+      font-size:.75rem;font-weight:600;line-height:1;border-width:1px}
+    .o-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.5rem}
+    @media (max-width:640px){ .o-meta{grid-template-columns:1fr} }
+    .o-meta div{background:#fafafa;border:1px solid #eee;border-radius:.6rem;padding:.35rem .6rem}
+    .o-list li{display:flex;justify-content:space-between;gap:.75rem}
+    .o-act button{position:relative}
+    .compact-only{display:none;}
+    .is-compact .full-only{display:none !important;}
+    .is-compact .compact-only{display:block !important;}
+    .o-toggle{font-size:.8rem;padding:.25rem .5rem;border-radius:.6rem;border:1px solid #e5e7eb}
+  `;
+  document.head.appendChild(st);
+})();
+
+(function ensureFiltersStyles() {
+  if (document.getElementById("orders-filters-styles")) return;
+  const st = document.createElement("style");
+  st.id = "orders-filters-styles";
+  st.textContent = `
+  .of-bar{position:sticky; top:0; z-index:30; background:transparent; margin-bottom:.75rem}
+  .of-search{display:flex; align-items:center; gap:.5rem; background:#fff; border:1px solid #e5e7eb;
+    border-radius:9999px; padding:.6rem .9rem; box-shadow:0 8px 24px rgba(0,0,0,.06)}
+  .of-search input{flex:1; border:0; outline:0; background:transparent; font-size:0.95rem}
+  .of-filter-btn{width:40px; height:40px; border-radius:50%; border:1px solid #e5e7eb;
+    background:#fff; display:grid; place-items:center; box-shadow:0 4px 12px rgba(0,0,0,.06)}
+  .of-overlay{position:fixed; inset:0; background:rgba(0,0,0,.40); backdrop-filter:blur(2px);
+    opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:40}
+  .of-panel{position:fixed; left:50%; transform:translateX(-50%) translateY(-8px); top:72px;
+    width:min(960px,94vw); background:#fff; border:1px solid #e5e7eb; border-radius:16px;
+    box-shadow:0 24px 64px rgba(0,0,0,.20); opacity:0; pointer-events:none; transition:opacity .2s, transform .2s; z-index:45}
+  .of-panel.open, .of-overlay.open{opacity:1; pointer-events:auto}
+  .of-panel.open{transform:translateX(-50%) translateY(0)}
+  @media (max-width:640px){
+    .of-panel{top:auto; bottom:0; left:0; right:0; transform:translateY(100%); width:100%; border-radius:16px 16px 0 0}
+    .of-panel.open{transform:translateY(0)}
+  }
+  `;
+  document.head.appendChild(st);
+})();
+
+(function ensureGridCardFix() {
+  if (document.getElementById("orders-grid-card-fix")) return;
+  const st = document.createElement("style");
+  st.id = "orders-grid-card-fix";
+  st.textContent = `
+    #orders-list{align-items:start}
+    #orders-list > *{align-self:start}
+    .o-card{height:auto}
+    .o-meta > div{min-width:0}
+    .o-meta .fancy-select{display:block; width:100%; min-width:0}
+    .o-meta .fancy-select .fs-control{min-height:42px}
+    .o-extra{overflow:hidden; transition:max-height .28s ease, opacity .2s ease}
+    .o-extra.no-anim{transition:none !important}
+    .o-extra.collapsed{max-height:0; opacity:0}
+    .o-extra.expanded{opacity:1}
+  `;
+  document.head.appendChild(st);
+})();
+
+(function ensureGlobalUiFixes() {
+  if (document.getElementById("global-ui-fixes")) return;
+  const st = document.createElement("style");
+  st.id = "global-ui-fixes";
+  st.textContent = `
+    .fancy-select{display:block; width:100%}
+    .fancy-select .fs-control{display:flex; width:100%; min-height:40px}
+    @media (min-width:768px){ .fancy-select .fs-control{min-height:44px; font-size:.95rem} }
+    .fancy-select .fs-chips{min-width:0}
+    .o-extra{overflow:hidden; transition:max-height .28s ease, opacity .2s ease}
+    .o-extra.no-anim{transition:none !important}
+    .o-extra.collapsed{max-height:0; opacity:0}
+    .o-extra.expanded{opacity:1}
+  `;
+  document.head.appendChild(st);
+})();
 
 /* =========================
    Tarjeta de pedido
    ========================= */
 function agregarTarjetaPedido(pedido, container) {
-  const card = document.createElement("div");
-  card.className = "tarjeta-animada border border-gray-200 rounded-xl p-4 bg-white shadow-sm transition";
+  const estadoNombre = pedido.Estado || MAP_ESTADOS.get(Number(pedido.idEstadoPedido))?.nombre || "-";
+  const badgeCls = badgeColorForEstado(estadoNombre);
+  const accent = accentForEstado(estadoNombre);
 
-  const listaPlatillos = (pedido.Platillos || []).map(x => `<li>${x.nombre} (x${x.cantidad})</li>`).join("");
-  const total    = Number(pedido._total || 0).toFixed(2);
+  const card = document.createElement("article");
+  card.className = "o-card border border-gray-200 rounded-2xl p-4 bg-white shadow-sm";
+  card.style.setProperty("--accent", accent);
+
+  const items = (pedido.Platillos || []);
+  const itemsHTML = items.length
+    ? items.map(x => `
+        <li class="flex justify-between gap-2">
+          <span class="truncate">${x.nombre} <span class="text-gray-500">(x${x.cantidad || x.qty || 1})</span></span>
+          <span class="shrink-0">$${Number((x.precio || 0) * (x.cantidad || x.qty || 1)).toFixed(2)}</span>
+        </li>
+      `).join("")
+    : `<li class="text-gray-500">(sin platillos)</li>`;
+
+  const total = Number(pedido._total || 0).toFixed(2);
   const subtotal = Number(pedido._subtotal || 0).toFixed(2);
-  const propina  = Number(pedido._propina || 0).toFixed(2);
+  const propina = Number(pedido._propina || 0).toFixed(2);
+  const fechaBon = fmtFechaCorta(pedido.Hora);
+  const nomMesa = pedido.Mesa ? String(pedido.Mesa) : "-";
+  const nomEmp = getEmpleadoNombre(pedido.idEmpleado);
+  const obs = pedido.Observaciones || "—";
+
+  const estadosOpts = (ESTADOS_ORDER || [])
+    .map(e => `<option value="${e.id}" ${Number(e.id) === Number(pedido.idEstadoPedido) ? "selected" : ""}>${e.nombre}</option>`)
+    .join("");
 
   card.innerHTML = `
-    <div class="flex justify-between items-start">
-      <div>
-        <div class="text-sm text-gray-500">Cliente</div>
-        <div class="text-lg font-semibold">${pedido.Cliente || "-"}</div>
+    <div class="o-stripe"></div>
+    <header class="o-head">
+      <div class="min-w-0">
+        <div class="text-xs text-gray-500">Cliente</div>
+        <div class="text-lg font-semibold truncate">${pedido.Cliente || "-"}</div>
       </div>
-      <button class="${PILL_NEUTRAL} estado-pill" title="Cambiar estado">
-        ${pedido.Estado || "—"}
-      </button>
+      <div class="flex items-center gap-2">
+        <span class="o-badge ring ${badgeCls}">
+          <span class="w-2 h-2 rounded-full bg-current opacity-60"></span>
+          <span class="capitalize">${estadoNombre}</span>
+        </span>
+        <button class="o-toggle" type="button" title="Expandir/compactar">
+          <span class="lbl hidden sm:inline">Detalle</span>
+          <svg class="chev" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M7 10l5 5 5-5z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="mt-2 text-sm text-gray-700">
+      <div class="flex items-center gap-2">
+        <div class="text-xs text-gray-500">Mesa</div>
+        <div class="font-medium">${nomMesa}</div>
+        <div class="text-gray-300">•</div>
+        <div class="text-xs text-gray-500">Fecha</div>
+        <div class="font-medium">${fechaBon}</div>
+      </div>
+      <ul class="mt-2 space-y-1">${itemsHTML}</ul>
+      <div class="mt-2 text-right">
+        <span class="text-xs text-gray-500 mr-1">Total</span>
+        <span class="text-base font-semibold">$${total}</span>
+      </div>
     </div>
-    <div class="mt-2 text-sm">
-      <div><strong>Mesa:</strong> ${pedido.Mesa || "-"}</div>
-      <div><strong>Fecha:</strong> ${pedido.Hora || "-"}</div>
-    </div>
-    <div class="mt-3">
-      <ul class="text-sm list-disc list-inside text-gray-700">
-        ${listaPlatillos || "<li>(sin platillos)</li>"}
-      </ul>
-    </div>
-    <div class="mt-3 text-sm text-gray-700">
-      <div><strong>Subtotal:</strong> $${subtotal}</div>
-      <div><strong>Propina (10%):</strong> $${propina}</div>
-      <div><strong>Total:</strong> $${total}</div>
-    </div>
-    <div class="mt-4 flex gap-2">
-      <button class="btn-editar px-3 py-1 rounded bg-blue-500 text-white">Editar</button>
-      <button class="btn-eliminar px-3 py-1 rounded bg-red-500 text-white">Eliminar</button>
-    </div>
+
+    <section class="o-extra collapsed mt-3">
+      <div class="o-meta text-sm text-gray-700">
+        <div><div class="text-xs text-gray-500">Mesero</div><div class="font-medium truncate">${nomEmp}</div></div>
+        <div class="estado-cell">
+          <div class="text-xs text-gray-500 mb-0.5">Estado</div>
+          <select id="sel-estado-${pedido.id}" class="w-full rounded-lg border border-gray-300 bg-white px-2 py-1">
+            ${estadosOpts}
+          </select>
+        </div>
+        <div><div class="text-xs text-gray-500">Observaciones</div><div class="font-medium truncate">${obs}</div></div>
+      </div>
+
+      <div class="mt-3 text-sm text-gray-700 grid grid-cols-3 gap-2">
+        <div class="bg-gray-50 border border-gray-200 rounded-lg p-2">
+          <div class="text-xs text-gray-500">Subtotal</div><div class="font-semibold">$${subtotal}</div>
+        </div>
+        <div class="bg-gray-50 border border-gray-200 rounded-lg p-2">
+          <div class="text-xs text-gray-500">Propina (10%)</div><div class="font-semibold">$${propina}</div>
+        </div>
+        <div class="bg-gray-50 border border-gray-200 rounded-lg p-2">
+          <div class="text-xs text-gray-500">Total</div><div class="font-semibold">$${total}</div>
+        </div>
+      </div>
+
+      <div class="o-act mt-4 flex gap-2">
+        <button class="btn-editar px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm">Editar</button>
+        <button class="btn-eliminar px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm">Eliminar</button>
+      </div>
+    </section>
   `;
 
+  const extra = card.querySelector(".o-extra");
+  const toggleBtn = card.querySelector(".o-toggle");
+  const chev = toggleBtn.querySelector(".chev");
+
+  // Estado inicial: todas colapsadas por defecto
+  card.dataset.expanded = "0";
+  extra.style.maxHeight = "0px";
+
+  container.appendChild(card);
+
+  // Toggle con animación suave que empuja hacia abajo (en SU columna)
+  const setExpanded = (on) => {
+    const expanded = !!on;
+    card.dataset.expanded = expanded ? "1" : "0";
+    if (expanded) {
+      extra.classList.remove("collapsed");
+      extra.classList.add("expanded");
+      const height = extra.scrollHeight;
+      extra.style.maxHeight = height + "px";
+      chev.style.transform = "rotate(180deg)";
+    } else {
+      extra.classList.add("collapsed");
+      extra.classList.remove("expanded");
+      extra.style.maxHeight = "0px";
+      chev.style.transform = "rotate(0deg)";
+    }
+  };
+
+  toggleBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    withScrollFreeze(() => setExpanded(card.dataset.expanded !== "1"));
+  });
+
+  // Acciones eliminar / editar
   card.querySelector(".btn-eliminar").addEventListener("click", async (ev) => {
     ev.stopPropagation();
     const ok = await showConfirm({
@@ -824,10 +1329,7 @@ function agregarTarjetaPedido(pedido, container) {
       cancelText: "Cancelar",
       variant: "danger",
     });
-    if (!ok) {
-      showAlert("info", "Operación cancelada");
-      return;
-    }
+    if (!ok) { showAlert("info", "Operación cancelada"); return; }
     try {
       await deletePedido(pedido.id);
       card.remove();
@@ -844,19 +1346,18 @@ function agregarTarjetaPedido(pedido, container) {
     abrirEdicionDesdeCard(pedido);
   });
 
-  card.querySelector(".estado-pill").addEventListener("click", async (ev) => {
-    ev.stopPropagation();
+  // Select de estado
+  const selEstado = card.querySelector(`#sel-estado-${pedido.id}`);
+  upgradeSelect?.(selEstado, { placeholder: "Estado" });
+  selEstado.addEventListener("change", async () => {
+    const newId = Number(selEstado.value);
+    if (!Number.isFinite(newId) || newId <= 0) return;
+    const det = (pedido.Platillos || [])
+      .filter(pl => Number.isFinite(Number(pl.idPlatillo)))
+      .map(pl => ({ idPlatillo: Number(pl.idPlatillo), cantidad: Math.max(1, Number(pl.cantidad || pl.qty || 1)), precioUnitario: Number(pl.precio || 0) }));
+    if (!det.length) { showAlert("error", "El pedido no tiene items para actualizar."); selEstado.value = String(pedido.idEstadoPedido); selEstado._fancy?.sync?.(); return; }
+
     try {
-      if (!ESTADOS_ORDER.length) await cargarEstadosYSelect();
-      const newId = nextEstadoId(pedido.idEstadoPedido);
-      if (!Number.isFinite(newId)) throw new Error("No hay estados configurados.");
-
-      const items = (pedido.Platillos || [])
-        .filter(pl => Number.isFinite(Number(pl.idPlatillo)) && Number(pl.idPlatillo) > 0)
-        .map(pl => ({ idPlatillo: Number(pl.idPlatillo), cantidad: Math.max(1, Number(pl.cantidad || 1)) }));
-
-      if (!items.length) throw new Error("El pedido no tiene items para actualizar.");
-
       await updatePedido(pedido.id, {
         nombreCliente: pedido.Cliente || "Cliente",
         idMesa: Number(pedido.idMesa || pedido.Mesa || 0),
@@ -864,27 +1365,34 @@ function agregarTarjetaPedido(pedido, container) {
         idEstadoPedido: newId,
         observaciones: pedido.Observaciones || "Sin observaciones",
         propina: Number(pedido._propina || 0),
-        items
+        items: det
       });
-
       pedido.idEstadoPedido = newId;
       const newName = MAP_ESTADOS.get(newId)?.nombre || "";
       pedido.Estado = newName;
-      const pill = card.querySelector(".estado-pill");
-      if (pill && newName) pill.textContent = newName;
 
-      if ((newName || "").toLowerCase().includes("cancel")) {
+      const badge = card.querySelector(".o-badge");
+      if (badge) {
+        badge.className = `o-badge ring ${badgeColorForEstado(newName)}`;
+        badge.lastElementChild.textContent = newName || "—";
+      }
+      card.style.setProperty("--accent", accentForEstado(newName));
+
+      const n = (newName || "").toLowerCase();
+      if (n.includes("pag") || n.includes("entreg")) {
         const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
         if (idMesa) await liberarMesa(idMesa);
       }
 
+      selEstado._fancy?.sync?.();
+      if (card.dataset.expanded === "1") extra.style.maxHeight = extra.scrollHeight + "px";
       showAlert("success", `Estado actualizado a "${newName}"`);
     } catch (e) {
+      selEstado.value = String(pedido.idEstadoPedido);
+      selEstado._fancy?.sync?.();
       showAlert("error", e.message || "No se pudo cambiar el estado");
     }
   });
-
-  container.appendChild(card);
 }
 
 /* =========================
@@ -897,16 +1405,14 @@ function abrirEdicionDesdeCard(pedido) {
   editingId = Number(pedido.id);
   editingOriginalMesaId = Number(pedido.idMesa || 0);
 
-  // set con platillos originales
   editingOriginalPlatillos = new Set(
     (pedido.Platillos || []).map(pl => Number(pl.idPlatillo)).filter(Boolean)
   );
 
-  // mapa idPlatillo -> idDetalle + max idDetalle
   editingOriginalLinesByPlatillo = new Map();
   editingMaxIdDetalle = 0;
   (pedido.Platillos || []).forEach(pl => {
-    const idP  = Number(pl.idPlatillo);
+    const idP = Number(pl.idPlatillo);
     const idDet = Number(pl.idDetalle ?? pl.linea ?? 0);
     if (idP && idDet) {
       editingOriginalLinesByPlatillo.set(idP, idDet);
@@ -915,7 +1421,7 @@ function abrirEdicionDesdeCard(pedido) {
   });
 
   $("#customer-name").value = pedido.Cliente || "";
-  $("#order-notes").value   = pedido.Observaciones || "";
+  $("#order-notes").value = pedido.Observaciones || "";
 
   const selEstado = $("#status-select");
   if (selEstado && selEstado.querySelector(`option[value="${pedido.idEstadoPedido}"]`)) {
@@ -924,7 +1430,7 @@ function abrirEdicionDesdeCard(pedido) {
 
   const sel = (pedido.Platillos || []).map(pl => ({
     id: pl.idPlatillo || 0,
-    idDetalle: pl.idDetalle,            // lo conservamos en la selección
+    idDetalle: pl.idDetalle,
     nombre: pl.nombre,
     precio: Number(pl.precio || 0),
     qty: Number(pl.cantidad || 1)
@@ -933,7 +1439,7 @@ function abrirEdicionDesdeCard(pedido) {
   renderSeleccionUI();
 
   const waiterSelect = $("#waiter-select");
-  const tableSelect  = $("#table-select");
+  const tableSelect = $("#table-select");
 
   Promise.resolve()
     .then(() => cargarEmpleados(waiterSelect, { initialId: pedido.idEmpleado }))
@@ -949,15 +1455,11 @@ function abrirEdicionDesdeCard(pedido) {
   const saveBtn = $("#save-order-btn");
   if (saveBtn) saveBtn.textContent = "Actualizar pedido";
 
+  document.getElementById("orders-filters")?.classList.add("hidden");
   $("#new-order-form").classList.remove("hidden");
   $("#orders-list").classList.add("hidden");
   $("#new-order-btn").classList.add("hidden");
 }
-
-
-
-
-
 
 /* =========================
    Lista
@@ -971,23 +1473,46 @@ function emptyState(msg) {
       </div>
     </div>`;
 }
+
 async function cargarPedidosDeApi(container, onAddCard) {
   let raw = [];
   try { raw = await getPedidos(0, 50); }
   catch (e) { container.innerHTML = emptyState("No se pudieron cargar los pedidos."); return; }
 
   const mapped = [];
-  for (const p of raw) { try { mapped.push(fromApi(p)); } catch {} }
+  for (const p of raw) { try { mapped.push(fromApi(p)); } catch { } }
 
-  if (!mapped.length) { container.innerHTML = emptyState("No hay pedidos para mostrar."); return; }
-
-  container.innerHTML = "";
-  mapped.forEach(p => { try { onAddCard(p, container); } catch {} });
+  ORDERS_CACHE = mapped;
+  renderOrdersList(container, onAddCard);
+  ensureFilterBar();
 }
 
 /* =========================
    Selección + Totales
    ========================= */
+(function ensureMetaResponsiveCols() {
+  if (document.getElementById("orders-meta-responsive")) return;
+  const st = document.createElement("style");
+  st.id = "orders-meta-responsive";
+  st.textContent = `
+    #orders-list .o-meta{
+      display:grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap:.5rem;
+    }
+    #orders-list .o-meta .estado-cell{
+      grid-column: span 2;
+    }
+    @media (min-width: 920px){
+      #orders-list .o-meta .estado-cell{ grid-column: auto; }
+    }
+    #orders-list .o-meta .fancy-select{ display:block; width:100%; min-width:0; }
+    #orders-list .o-meta .fancy-select .fs-control{ min-height:44px; width:100%; }
+    #orders-list .o-meta select{ width:100%; min-width:0; }
+  `;
+  document.head.appendChild(st);
+})();
+
 function ensureTotalsBlock(sectionEl) {
   let summary = document.getElementById("order-summary");
   if (!summary) {
@@ -1068,12 +1593,12 @@ function renderSeleccionUI() {
 
   const TIP_RATE = 0.10;
   const subtotal = sel.reduce((sum, it) => sum + (Number(it.precio) || 0) * (it.qty || 1), 0);
-  const propina  = +(subtotal * TIP_RATE).toFixed(2);
-  const total    = +(subtotal + propina).toFixed(2);
+  const propina = +(subtotal * TIP_RATE).toFixed(2);
+  const total = +(subtotal + propina).toFixed(2);
 
   const { subEl, tipEl, totalEl } = ensureTotalsBlock(secSel);
-  if (subEl)  subEl.textContent  = subtotal.toFixed(2);
-  if (tipEl)  tipEl.textContent  = propina.toFixed(2);
+  if (subEl) subEl.textContent = subtotal.toFixed(2);
+  if (tipEl) tipEl.textContent = propina.toFixed(2);
   if (totalEl) totalEl.textContent = total.toFixed(2);
 }
 
@@ -1083,39 +1608,33 @@ function renderSeleccionUI() {
 function buildPayloadsFromSelection() {
   const seleccion = getSeleccion();
 
-  // Cliente
   const nombreCliente = ($("#customer-name")?.value || "").trim();
-  if (!nombreCliente) { markInvalid("customer-name"); showAlert("error","El nombre del cliente es obligatorio"); throw new Error("VALIDATION"); }
+  if (!nombreCliente) { markInvalid("customer-name"); showAlert("error", "El nombre del cliente es obligatorio"); throw new Error("VALIDATION"); }
 
-  // Mesa
   const mesaSel = document.getElementById("table-select");
   let idMesa = Number(mesaSel?.value || "");
   if (!Number.isFinite(idMesa) || idMesa <= 0) {
     const firstEnabled = Array.from(mesaSel?.options || []).find(o => o.value && !o.disabled);
     if (firstEnabled) { mesaSel.value = firstEnabled.value; mesaSel.dispatchEvent(new Event("change", { bubbles: true })); idMesa = Number(firstEnabled.value); }
   }
-  if (!Number.isFinite(idMesa) || idMesa <= 0) { markInvalid("table-select"); showAlert("error","Selecciona una mesa válida"); throw new Error("VALIDATION"); }
+  if (!Number.isFinite(idMesa) || idMesa <= 0) { markInvalid("table-select"); showAlert("error", "Selecciona una mesa válida"); throw new Error("VALIDATION"); }
 
-  // Mesero
   const waiterSel = document.getElementById("waiter-select");
   let idEmpleado = Number(waiterSel?.value || "");
   if (!Number.isFinite(idEmpleado) || idEmpleado <= 0) {
     const firstOpt = Array.from(waiterSel?.options || []).find(o => o.value);
     if (firstOpt) { waiterSel.value = firstOpt.value; waiterSel.dispatchEvent(new Event("change", { bubbles: true })); idEmpleado = Number(firstOpt.value); }
   }
-  if (!Number.isFinite(idEmpleado) || idEmpleado <= 0) { markInvalid("waiter-select"); showAlert("error","Selecciona un mesero válido"); throw new Error("VALIDATION"); }
+  if (!Number.isFinite(idEmpleado) || idEmpleado <= 0) { markInvalid("waiter-select"); showAlert("error", "Selecciona un mesero válido"); throw new Error("VALIDATION"); }
 
-  // Estado
   let idEstadoPedido = Number($("#status-select")?.value || "");
   if (!Number.isFinite(idEstadoPedido) || idEstadoPedido <= 0) {
     if (ESTADOS_ORDER?.length) idEstadoPedido = Number(ESTADOS_ORDER[0].id);
   }
-  if (!Number.isFinite(idEstadoPedido) || idEstadoPedido <= 0) { markInvalid("status-select"); showAlert("error","Selecciona un estado válido"); throw new Error("VALIDATION"); }
+  if (!Number.isFinite(idEstadoPedido) || idEstadoPedido <= 0) { markInvalid("status-select"); showAlert("error", "Selecciona un estado válido"); throw new Error("VALIDATION"); }
 
-  // Platillos seleccionados
-  if (!Array.isArray(seleccion) || !seleccion.length) { showAlert("info","Agrega al menos un platillo"); throw new Error("VALIDATION"); }
+  if (!Array.isArray(seleccion) || !seleccion.length) { showAlert("info", "Agrega al menos un platillo"); throw new Error("VALIDATION"); }
 
-  // Agrupar por idPlatillo y conservar precio unitario + idDetalle (si existe)
   const agrupados = new Map();
   for (const it of seleccion) {
     const idPlatillo = Number((it && it.id) ?? (it && it.idPlatillo));
@@ -1128,18 +1647,11 @@ function buildPayloadsFromSelection() {
     const prev = agrupados.get(idPlatillo) || { cantidad: 0, precioUnitario: 0, idDetalle: undefined };
     prev.cantidad += qty;
     if (Number.isFinite(precio) && precio > 0) prev.precioUnitario = precio;
-
-    // si venía idDetalle en la selección, lo guardamos
     if (Number.isFinite(idDetSel) && idDetSel > 0) prev.idDetalle = idDetSel;
 
     agrupados.set(idPlatillo, prev);
   }
 
-  // Construir items:
-  // - si estamos EDITANDO (editingId != null):
-  //     * si existe idDetalle en el mapeo original → lo usamos
-  //     * si no, asignamos un idDetalle nuevo: max+1, max+2, ...
-  // - si es NUEVO (crear) → no mandamos idDetalle (backend lo asigna)
   let lineCounter = editingMaxIdDetalle || 0;
   const items = Array.from(agrupados.entries()).map(([idPlatillo, v]) => {
     const base = {
@@ -1155,7 +1667,6 @@ function buildPayloadsFromSelection() {
       if (Number.isFinite(idDet) && idDet > 0) {
         base.idDetalle = idDet;
       } else {
-        // línea nueva en modo edición → asignamos un idDetalle que no choque
         lineCounter += 1;
         base.idDetalle = lineCounter;
       }
@@ -1163,24 +1674,22 @@ function buildPayloadsFromSelection() {
     return base;
   });
 
-  if (!items.length) { showAlert("info","Agrega al menos un platillo válido"); throw new Error("VALIDATION"); }
-  // actualizar contador global para próximas ediciones
+  if (!items.length) { showAlert("info", "Agrega al menos un platillo válido"); throw new Error("VALIDATION"); }
   editingMaxIdDetalle = lineCounter;
 
-  // Totales
   const subtotal = items.reduce((acc, it) => acc + (it.precioUnitario || 0) * (it.cantidad || 0), 0);
-  const propina  = +(subtotal * 0.10).toFixed(2);
-  const total    = +(subtotal + propina).toFixed(2);
+  const propina = +(subtotal * 0.10).toFixed(2);
+  const total = +(subtotal + propina).toFixed(2);
 
   const observaciones = ($("#order-notes")?.value || "").trim() || "Sin cebolla";
   const fpedido = formatDateTimeLocal(new Date());
 
   return {
     totalPedido: Number(total.toFixed(2)),
-    subtotal:    Number(subtotal.toFixed(2)),
-    propina:     Number(propina.toFixed(2)),
+    subtotal: Number(subtotal.toFixed(2)),
+    propina: Number(propina.toFixed(2)),
     fpedido,
-    items,                      // [{idPlatillo,cantidad,precioUnitario, (idDetalle si edit)}]
+    items,
     nombreCliente,
     observaciones,
     idMesa,
@@ -1188,7 +1697,6 @@ function buildPayloadsFromSelection() {
     idEstadoPedido
   };
 }
-
 
 /* =========================
    Crear / Actualizar
@@ -1198,32 +1706,24 @@ async function crearPedidoDesdeSeleccion() {
   await createPedido(body);
   if (body.idMesa) await ocuparMesa(body.idMesa);
 }
-
-// Reemplaza COMPLETO
 async function actualizarPedido(editId) {
   if (!Number.isFinite(editId)) throw new Error("ID inválido para actualizar.");
-  const body = buildPayloadsFromSelection();   // incluye idDetalle cuando corresponde
+  const body = buildPayloadsFromSelection();
 
   await updatePedido(editId, body);
 
-  // Si cambió la mesa, liberar la anterior y ocupar la nueva
   const nuevaMesaId = Number(body.idMesa || 0);
-  const mesaAntes   = Number(editingOriginalMesaId || 0);
+  const mesaAntes = Number(editingOriginalMesaId || 0);
   if (mesaAntes && nuevaMesaId && mesaAntes !== nuevaMesaId) {
-    try { await liberarMesa(mesaAntes); } catch {}
-    try { await ocuparMesa(nuevaMesaId); } catch {}
+    try { await liberarMesa(mesaAntes); } catch { }
+    try { await ocuparMesa(nuevaMesaId); } catch { }
   }
 
-  // limpiar contexto de edición
   editingOriginalMesaId = null;
   editingOriginalPlatillos = new Set();
   editingOriginalLinesByPlatillo = new Map();
   editingMaxIdDetalle = 0;
 }
-
-
-
-
 
 /* =========================
    INIT
@@ -1231,27 +1731,28 @@ async function actualizarPedido(editId) {
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
-  const ordersList      = $("#orders-list");
-  const newOrderBtn     = $("#new-order-btn");
-  const newOrderForm    = $("#new-order-form");
+  const ordersList = $("#orders-list");
+  const newOrderBtn = $("#new-order-btn");
+  const newOrderForm = $("#new-order-form");
   const backToOrdersBtn = $("#back-to-orders");
-  const orderTime       = $("#order-time");
-  const saveOrderBtn    = $("#save-order-btn");
-  const addDishesBtn    = $("#add-dishes-btn");
-  const waiterSelect    = $("#waiter-select");
-  const tableSelect     = $("#table-select");
+  const orderTime = $("#order-time");
+  const saveOrderBtn = $("#save-order-btn");
+  const addDishesBtn = $("#add-dishes-btn");
+  const waiterSelect = $("#waiter-select");
+  const tableSelect = $("#table-select");
 
   // 1) Catálogos y lista de pedidos
   await cargarCatalogos(); // estados + platillos
   await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
 
-  // 2) Cargar selects por defecto (si se abre el form después se re-cargan)
+  // 2) Cargar selects por defecto
   await cargarEmpleados(waiterSelect);
   await cargarMesasSelect();
 
   // 3) Abrir “nuevo pedido”
   newOrderBtn?.addEventListener("click", () => {
-    // limpiar cualquier rastro de edición
+    document.getElementById("orders-filters")?.classList.add("hidden");
+
     editingId = null;
     sessionStorage.removeItem(K_EDIT_ID);
     sessionStorage.removeItem(K_EDIT_EMP);
@@ -1265,15 +1766,21 @@ async function init() {
     newOrderBtn.classList.add("hidden");
     if (orderTime) orderTime.value = new Date().toLocaleDateString("es-ES");
 
-    // preparar selects
     cargarEmpleados(waiterSelect);
     cargarMesasSelect();
 
     if (location.hash === "#new") history.replaceState({}, "", location.pathname);
+
+    requestAnimationFrame(() => {
+      document.getElementById("new-order-form")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   });
 
   // 4) Volver a la lista
   backToOrdersBtn?.addEventListener("click", () => {
+    document.getElementById("orders-filters")?.classList.remove("hidden");
+
     newOrderForm.classList.add("hidden");
     ordersList.classList.remove("hidden");
     newOrderBtn.classList.remove("hidden");
@@ -1281,7 +1788,6 @@ async function init() {
     setSeleccion([]); renderSeleccionUI();
     editingId = null;
 
-    // limpiar estado de edición
     sessionStorage.removeItem(K_EDIT_ID);
     sessionStorage.removeItem(K_EDIT_EMP);
     sessionStorage.removeItem(K_EDIT_MESA);
@@ -1295,11 +1801,10 @@ async function init() {
     saveFormSnapshot();
     sessionStorage.setItem(K_OPEN_FORM, "1");
 
-    // si estamos editando, persistir ids necesarios
     if (Number.isFinite(Number(editingId)) && editingId > 0) {
-      sessionStorage.setItem(K_EDIT_ID,   String(editingId));
-      sessionStorage.setItem(K_EDIT_EMP,  String($("#waiter-select")?.value || ""));
-      sessionStorage.setItem(K_EDIT_MESA, String($("#table-select")?.value  || ""));
+      sessionStorage.setItem(K_EDIT_ID, String(editingId));
+      sessionStorage.setItem(K_EDIT_EMP, String($("#waiter-select")?.value || ""));
+      sessionStorage.setItem(K_EDIT_MESA, String($("#table-select")?.value || ""));
     }
 
     const back = (location.pathname.split("/").pop() || "orders.html") + "#new";
@@ -1321,20 +1826,17 @@ async function init() {
         editingId = null;
       }
 
-      // limpiar estado de edición SIEMPRE
       sessionStorage.removeItem(K_EDIT_ID);
       sessionStorage.removeItem(K_EDIT_EMP);
       sessionStorage.removeItem(K_EDIT_MESA);
       editingOriginalMesaId = null;
       editingOriginalPlatillos = new Set();
 
-      // dejar form limpio y volver a la lista
       resetOrderForm();
       newOrderForm.classList.add("hidden");
       ordersList.classList.remove("hidden");
       newOrderBtn.classList.remove("hidden");
 
-      // refrescar tarjetas y disponibilidad de mesas
       ordersList.innerHTML = "";
       await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
       await cargarMesasSelect();
@@ -1348,6 +1850,8 @@ async function init() {
 
   // 7) Reapertura automática del formulario (volviste de menu.html o #new)
   if (sessionStorage.getItem(K_OPEN_FORM) === "1" || location.hash === "#new") {
+    document.getElementById("orders-filters")?.classList.add("hidden");
+
     newOrderForm.classList.remove("hidden");
     ordersList.classList.add("hidden");
     newOrderBtn.classList.add("hidden");
@@ -1356,10 +1860,9 @@ async function init() {
     restoreFormSnapshot();
     renderSeleccionUI();
 
-    // Restaurar modo edición si venimos de menu.html
-    const storedEditId  = Number(sessionStorage.getItem(K_EDIT_ID)  || "");
-    const storedEmpId   = Number(sessionStorage.getItem(K_EDIT_EMP)  || "");
-    const storedMesaId  = Number(sessionStorage.getItem(K_EDIT_MESA) || "");
+    const storedEditId = Number(sessionStorage.getItem(K_EDIT_ID) || "");
+    const storedEmpId = Number(sessionStorage.getItem(K_EDIT_EMP) || "");
+    const storedMesaId = Number(sessionStorage.getItem(K_EDIT_MESA) || "");
 
     if (Number.isFinite(storedEditId) && storedEditId > 0) {
       editingId = storedEditId;
@@ -1376,7 +1879,6 @@ async function init() {
         if (tableSelect._fancy?.sync) tableSelect._fancy.sync();
       }
     } else {
-      // No hay edición: cargar selects normales
       await cargarEmpleados(waiterSelect);
       await cargarMesasSelect();
     }
@@ -1390,17 +1892,16 @@ async function init() {
   applyModernSkin();
 }
 
-
 // Marca un campo inválido visualmente
 function markInvalid(id) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.classList.add("ring-2","ring-red-500");
+  el.classList.add("ring-2", "ring-red-500");
   el.scrollIntoView({ behavior: "smooth", block: "center" });
-  setTimeout(() => el.classList.remove("ring-2","ring-red-500"), 1500);
+  setTimeout(() => el.classList.remove("ring-2", "ring-red-500"), 1500);
 }
 
 function formatDateTimeLocal(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
