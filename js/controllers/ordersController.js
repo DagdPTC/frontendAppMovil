@@ -233,9 +233,9 @@ function applyModernSkin() {
   }
 
   [["new-order-btn", "bg-blue-600 hover:bg-blue-700"],
-   ["save-order-btn", "bg-blue-600 hover:bg-blue-700"],
-   ["back-to-orders", "bg-gray-200 hover:bg-gray-300"],
-   ["add-dishes-btn", "bg-emerald-500 hover:bg-emerald-600"]]
+  ["save-order-btn", "bg-blue-600 hover:bg-blue-700"],
+  ["back-to-orders", "bg-gray-200 hover:bg-gray-300"],
+  ["add-dishes-btn", "bg-emerald-500 hover:bg-emerald-600"]]
     .forEach(([id, cls]) => {
       const b = document.getElementById(id);
       if (b) {
@@ -485,7 +485,7 @@ window.isMesaLockedByOrder = (idMesa) => getLockedSet().has(String(idMesa));
 const API_HOST = "http://localhost:8080";
 async function tryUpdateMesaEstado(idMesa, idEstadoMesa) {
   const url = `${API_HOST}/apiMesa/estado/${idMesa}/${idEstadoMesa}`;
-  const res = await fetch(url, { method: "PATCH" });
+  const res = await fetch(url, { method: "PATCH", credentials: "include" });
   return res.ok;
 }
 async function ocuparMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 2); } // Ocupada
@@ -582,7 +582,7 @@ async function cargarEmpleados(waiterSelect, opts = {}) {
 
   let empleados = [];
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { credentials: "include" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json().catch(() => ({}));
     empleados = Array.isArray(data?.content) ? data.content : (Array.isArray(data) ? data : []);
@@ -712,7 +712,12 @@ async function cargarMesasSelect(opts = {}) {
 
   let mesas = [], estadosMesa = [], pedidos = [], estadosPed = [];
   try {
-    const [rM, rEM, rP, rEP] = await Promise.all([fetch(urlMesas), fetch(urlEM), fetch(urlPed), fetch(urlEP)]);
+    const [rM, rEM, rP, rEP] = await Promise.all([
+      fetch(urlMesas, { credentials: "include" }),
+      fetch(urlEM, { credentials: "include" }),
+      fetch(urlPed, { credentials: "include" }),
+      fetch(urlEP, { credentials: "include" }),
+    ]);
     if (!rM.ok || !rEM.ok || !rP.ok || !rEP.ok) throw new Error("HTTP error");
     const [dM, dEM, dP, dEP] = await Promise.all([rM.json(), rEM.json(), rP.json(), rEP.json()]);
     mesas = Array.isArray(dM?.content) ? dM.content : (Array.isArray(dM) ? dM : []);

@@ -14,7 +14,7 @@ function pickArray(payload) {
   return [];
 }
 async function getJSON(url) {
-  const res = await fetch(url, {
+  const res = await fetch(url, { credentials: "include",
     headers: { Accept: "application/json" },
     cache: "no-cache",
   });

@@ -18,7 +18,7 @@ async function fetchEstadosMesa() {
 
   while (true) {
     const url = `${base}?page=${page}&size=${size}`;
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    const res = await fetch(url, { headers: { Accept: "application/json" }, credentials: "include" });
     if (!res.ok) break;
 
     const data = await res.json().catch(() => ({}));
@@ -265,7 +265,7 @@ function nowBetween(h1, h2) {
 /* ===== Cargas auxiliares ligeras ===== */
 async function getPedidosLight(page=0,size=MAX_SIZE) {
   const url = `${API_HOST}/apiPedido/getDataPedido?page=${page}&size=${Math.min(size, MAX_SIZE)}`;
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  const res = await fetch(url, { headers: { Accept: "application/json" }, credentials: "include" });
   const text = await res.text().catch(()=> "");
   if (!res.ok) return [];
   let data; try { data = text ? JSON.parse(text) : null; } catch { data = null; }
@@ -281,7 +281,7 @@ async function getPedidosLight(page=0,size=MAX_SIZE) {
 async function getReservasLight(page=0,size=MAX_SIZE) {
   try {
     const url = `${API_HOST}/apiReserva/getDataReserva?page=${page}&size=${Math.min(size, MAX_SIZE)}`;
-    const res = await fetch(url, { headers: { Accept: "application/json" } });
+    const res = await fetch(url, { headers: { Accept: "application/json" }, credentials: "include" });
     const text = await res.text().catch(()=> "");
     if (!res.ok) return [];
     let data; try { data = text ? JSON.parse(text) : null; } catch { data = null; }

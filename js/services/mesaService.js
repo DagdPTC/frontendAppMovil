@@ -23,7 +23,7 @@ function normalizaMesa(raw) {
 /** GET paginado: devuelve array normalizado de mesas */
 export async function getMesas(page = 0, size = 50) {
   const url = `${API.mesa}/getDataMesa?page=${encodeURIComponent(page)}&size=${encodeURIComponent(size)}`;
-  const res = await fetch(url, { method: "GET", headers: { Accept: "application/json" } });
+  const res = await fetch(url, { method: "GET", headers: { Accept: "application/json" }, credentials: "include" });
   if (!res.ok) throw new Error(`GET Mesas: ${res.status} ${res.statusText}`);
   const data = await res.json();
   const content = Array.isArray(data?.content) ? data.content.map(normalizaMesa).filter(Boolean) : [];

@@ -20,8 +20,7 @@ console.log("[ordersService exact] loaded");
 
 // ===== Helper HTTP =====
 async function fetchJSON(url, { method = "GET", headers = {}, body } = {}) {
-  const res = await fetch(url, {
-    method,
+  const res = await fetch(url, { method, credentials: "include", 
     headers: { "Content-Type": "application/json", Accept: "application/json", ...headers },
     body,
   });

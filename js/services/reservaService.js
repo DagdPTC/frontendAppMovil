@@ -16,7 +16,7 @@ function pickArray(payload) {
 }
 
 async function fetchJSON(url, options = {}) {
-  const res = await fetch(url, {
+  const res = await fetch(url, { credentials: "include",
     headers: {
       Accept: "application/json",
       ...(options.body ? { "Content-Type": "application/json" } : {}),

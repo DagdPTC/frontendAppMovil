@@ -9,7 +9,7 @@ function pickArray(payload) {
 }
 
 async function getJSON(url) {
-  const res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-cache" });
+  const res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-cache", credentials: "include" });
   const txt = await res.text().catch(() => "");
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${txt}`);
   return txt ? JSON.parse(txt) : null;

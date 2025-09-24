@@ -1,35 +1,112 @@
-document.addEventListener('DOMContentLoaded', function() {
-    const form = document.getElementById('loginForm');
-    form.addEventListener('submit', function(e) {
-        e.preventDefault();
-        const email = document.getElementById('email');
-        const password = document.getElementById('password');
-        if (!email.value || !password.value) {
-            alert('Completa ambos campos.');
-            return;
-        }
+// js/LogIn.js (ES module) — anima como antes (fade de elementos + shrink header), toasts y redirect a index.html
+import { API, fetchJSON } from "./services/apiConfig.js";
 
-        // Elementos a animar
-        const header = document.getElementById('loginHeader');
-        const headerTexts = document.getElementById('loginHeaderTexts');
-        const loginCard = document.getElementById('loginCard');
+const $ = (s, r=document) => r.querySelector(s);
 
-        // 1. Fade out form/tarjeta blanca
-        if (loginCard) {
-            loginCard.classList.add('fade-out');
-        }
+/* ====== helpers de alerta (mismo look & feel de pedidos) ====== */
+function ensureAlertHost() {
+  let host = document.getElementById("alerts-host");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "alerts-host";
+    host.setAttribute("aria-live", "polite");
+    host.className = "fixed top-4 right-4 z-50 space-y-3 pointer-events-none";
+    document.body.appendChild(host);
+  }
+  return host;
+}
 
-        // 2. Fade out textos header
-        if (headerTexts) {
-            headerTexts.style.opacity = 0;
-        }
+function showAlert(type = "info", text = "", opts = {}) {
+  const { timeout = 3500 } = opts;
+  const host = ensureAlertHost();
+  const wrap = document.createElement("div");
+  const color = { info: "bg-blue-500", error: "bg-red-500", success: "bg-green-600" }[type] || "bg-blue-500";
 
-        // 3. Encoge header azul (ajusta la animación si no está en tu CSS)
-        header.classList.add('shrink-animation');
+  wrap.className =
+    `pointer-events-auto rounded-xl px-4 py-3 shadow-lg text-white flex items-center gap-3 w-[min(92vw,380px)] ${color}`;
+  wrap.innerHTML = `
+    <div class="font-medium">${text}</div>
+    <button class="ml-auto opacity-80 hover:opacity-100 focus:outline-none">✕</button>
+  `;
+  host.appendChild(wrap);
 
-        // 4. Redirige después de la animación (ajusta el tiempo si cambiaste la duración)
-        setTimeout(function() {
-            window.location.href = "index.html";
-        }, 700);
-    });
+  const close = () => {
+    try {
+      wrap.style.transition = "opacity .2s ease, transform .2s ease";
+      wrap.style.opacity = "0";
+      wrap.style.transform = "translateY(-6px)";
+      setTimeout(() => wrap.remove(), 180);
+    } catch { wrap.remove(); }
+  };
+
+  wrap.querySelector("button")?.addEventListener("click", close);
+  if (timeout > 0) setTimeout(close, timeout);
+}
+
+/* ====== animación de éxito ====== */
+function playLoginSuccessFxFull() {
+  const header = document.getElementById("loginHeader");
+  const headerTexts = document.getElementById("loginHeaderTexts");
+  const card = document.getElementById("loginCard");
+  const btn = document.querySelector(".btn-login");
+
+  // fade-out primero
+  headerTexts?.classList.add("fade-out");
+  card?.classList.add("fade-out");
+  if (btn) { btn.disabled = true; btn.style.pointerEvents = "none"; }
+
+  // luego shrink del header
+  setTimeout(() => { header?.classList.add("shrink-animation"); }, 120);
+}
+
+/* ===================== login flow ===================== */
+document.addEventListener("DOMContentLoaded", () => {
+  const form = $("#loginForm");
+  const emailEl = $("#email");
+  const passEl  = $("#password");
+  const btn     = form?.querySelector('button[type="submit"]');
+
+  if (!form) return;
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const correo = emailEl?.value?.trim();
+    const contrasenia = passEl?.value ?? "";
+
+    if (!correo || !contrasenia) {
+      showAlert("error", "Completa ambos campos.");
+      return;
+    }
+
+    btn?.setAttribute("disabled", "true");
+
+    try {
+      // limpia sesión previa
+      try { await fetch(`${API.auth}/logout`, { method: "POST", credentials: "include" }); } catch {}
+
+      // login
+      await fetchJSON(`${API.auth}/login`, {
+        method: "POST",
+        body: JSON.stringify({ correo, contrasenia }),
+      });
+
+      // verifica contra cookie
+      const me = await fetchJSON(`${API.auth}/me`, { method: "GET" });
+      const mismoUsuario = (me?.correo || "").toLowerCase() === correo.toLowerCase();
+      if (!mismoUsuario) {
+        try { await fetch(`${API.auth}/logout`, { method: "POST", credentials: "include" }); } catch {}
+        throw new Error("Credenciales inválidas.");
+      }
+
+      // éxito → animación + toast + redirect a index
+      playLoginSuccessFxFull();
+      showAlert("success", "¡Bienvenido! Entrando…", { timeout: 1400 });
+      setTimeout(() => { window.location.href = "index.html"; }, 1000);
+
+    } catch (err) {
+      console.error(err);
+      showAlert("error", err?.message || "No se pudo iniciar sesión.");
+      btn?.removeAttribute("disabled");
+    }
+  });
 });
