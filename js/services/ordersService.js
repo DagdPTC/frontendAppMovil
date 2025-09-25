@@ -21,6 +21,61 @@ console.log("[ordersService exact] loaded");
 // ===== Helper HTTP =====
 // ===== Helper HTTP =====
 // ordersService.js
+
+
+function pad2(n){ return String(n).padStart(2, "0"); }
+function toApiDateTime(d) {
+  const dt = d instanceof Date ? d : new Date(d);
+  const y = dt.getFullYear();
+  const m = pad2(dt.getMonth() + 1);
+  const day = pad2(dt.getDate());
+  const hh = pad2(dt.getHours());
+  const mm = pad2(dt.getMinutes());
+  const ss = pad2(dt.getSeconds());
+  return `${y}-${m}-${day}T${hh}:${mm}:${ss}`;
+}
+
+
+export async function ensureMeInSession(opts = {}) {
+  const KEY = "ord_user";
+  const force = opts.forceNetwork === true;
+
+  if (!force) {
+    try {
+      const cached = JSON.parse(sessionStorage.getItem(KEY) || "null");
+      if (cached && cached.correo) return cached;
+    } catch { /* ignore */ }
+  }
+
+  try {
+    const res = await fetch(`${API_HOST}/api/auth/me`, {
+      method: "GET",
+      credentials: "include",
+      headers: {
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const me = {
+      correo: data.correo || null,
+      rol: data.rol || null,
+      username: data.username || data.user || data.nombreUsuario || data.nombreusuario || null,
+      usuarioId: Number(data.usuarioId ?? data.id ?? data.usuarioID ?? 0) || null,
+      idEmpleado: Number(data.idEmpleado ?? data.idempleado ?? 0) || null,
+    };
+
+    sessionStorage.setItem(KEY, JSON.stringify(me));
+    return me;
+  } catch (e) {
+    try { sessionStorage.removeItem(KEY); } catch {}
+    return { correo: null, rol: null, username: null, usuarioId: null, idEmpleado: null, error: e?.message || String(e) };
+  }
+}
+
+
 export async function fetchJSON(url, options = {}) {
   const res = await fetch(url, {
     credentials: "include",
@@ -136,11 +191,62 @@ export async function createPedido(body) {
 
 
 
-export async function updatePedido(id, body) {
-  const url = `${API_HOST}/apiPedido/modificarPedido/${encodeURIComponent(id)}`;
+export async function updatePedido(id, payload) {
+  // Determinar una fecha válida para cumplir con la validación del backend
+  const fechaBase =
+    payload?.FPedido ||
+    payload?.fpedido ||
+    payload?.horaInicio ||
+    payload?.Fecha ||
+    payload?.fecha ||
+    payload?.fechaPedido ||
+    new Date();
+
+  const FPedido = toApiDateTime(fechaBase);
+  const horaInicio = toApiDateTime(fechaBase);
+
+  // Normalizamos items mínimos que tu API requiere
+  const items = Array.isArray(payload?.items)
+    ? payload.items.map(pl => ({
+        idPlatillo: Number(pl.idPlatillo),
+        cantidad: Math.max(1, Number(pl.cantidad ?? pl.qty ?? 1)),
+        precioUnitario: Number(pl.precioUnitario ?? pl.precio ?? 0),
+      }))
+    : [];
+
+  const body = {
+    nombreCliente: payload?.nombreCliente ?? "Cliente",
+    idMesa: Number(payload?.idMesa),
+    idEmpleado: Number(payload?.idEmpleado),
+    idEstadoPedido: Number(payload?.idEstadoPedido),
+    observaciones: payload?.observaciones ?? "",
+    subtotal: Number(payload?.subtotal ?? 0),
+    propina: Number(payload?.propina ?? 0),
+    totalPedido: Number(
+      payload?.totalPedido ??
+      (Number(payload?.subtotal ?? 0) + Number(payload?.propina ?? 0))
+    ),
+    items,
+
+    // Clave para evitar el 400:
+    FPedido,
+    horaInicio,
+    fpedido: FPedido,   // compat
+    horaFin: payload?.horaFin ?? null,
+  };
+
+  // <<< AQUÍ ESTABA EL PROBLEMA >>>
+  const url = URL_PEDIDOS_UPDATE(id); // o: `${BASE_P}/modificarPedido/${encodeURIComponent(id)}`
+
   console.log("[PUT]", url, "payload:", body);
-  return fetchJSON(url, { method: "PUT", body: JSON.stringify(body) });
+
+  return fetchJSON(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
+
 
 
 

@@ -8,6 +8,7 @@ import {
   getEstadosPedido,
   getEmpleados,
   getMesasForOrders,
+  ensureMeInSession,
 } from "../services/ordersService.js";
 import { getPlatillos } from "../services/menuService.js";
 
@@ -56,6 +57,45 @@ function upgradeSelect(nativeSelect, opts = {}) {
   const multiple = nativeSelect.hasAttribute("multiple") || !!opts.multiple;
   const placeholder = opts.placeholder || "Seleccione…";
 
+  // ===== estilos del portal (una sola vez) =====
+  (function ensureFsPortalStyles() {
+    if (document.getElementById("fs-portal-styles")) return;
+    const st = document.createElement("style");
+    st.id = "fs-portal-styles";
+    st.textContent = `
+      .fs-portal-panel{
+        position: fixed;
+        z-index: 9999;
+        top: -9999px; left: -9999px;
+        width: 280px;
+        max-height: 60vh;
+        overflow: auto;
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 24px 64px rgba(0,0,0,.20);
+        opacity: 0; transform: scale(.98);
+        pointer-events: none;
+        transition: opacity .15s ease, transform .15s ease;
+      }
+      .fs-portal-panel.open{ opacity:1; transform: scale(1); pointer-events: auto; }
+      .fs-portal-header{ padding: 8px; border-bottom: 1px solid #f1f5f9; }
+      .fs-portal-search{
+        width:100%; border:1px solid #e5e7eb; border-radius:8px;
+        padding:6px 8px; font-size:14px; outline: none;
+      }
+      .fs-portal-list{ padding: 8px; }
+      .fs-portal-row{
+        width:100%; text-align:left; padding:8px 10px; border-radius:8px;
+        display:flex; align-items:center; gap:8px; border:1px solid transparent;
+      }
+      .fs-portal-row:hover{ background:#f9fafb; }
+      .fs-portal-mark{ width:16px; flex:0 0 16px; color:#10b981; }
+    `;
+    document.head.appendChild(st);
+  })();
+
+  // ===== estructura base alrededor del select =====
   const wrapper = document.createElement("div");
   wrapper.className = "fancy-select relative w-full";
   nativeSelect.insertAdjacentElement("afterend", wrapper);
@@ -87,33 +127,33 @@ function upgradeSelect(nativeSelect, opts = {}) {
   control.append(chips, caret);
   wrapper.appendChild(control);
 
+  // ====== PORTAL: panel se inserta en <body> y se posiciona sobre el control ======
   const panel = document.createElement("div");
-  panel.className = [
-    "fs-panel absolute left-0 right-0 top-[calc(100%+6px)] z-50",
-    "origin-top rounded-xl border border-gray-200 bg-white shadow-lg p-2",
-    "opacity-0 scale-95 pointer-events-none transition-all"
-  ].join(" ");
-
-  const searchWrap = document.createElement("div");
-  searchWrap.className = "mb-2";
+  panel.className = "fs-portal-panel";
+  const header = document.createElement("div");
+  header.className = "fs-portal-header";
   const search = document.createElement("input");
   search.type = "text";
   search.placeholder = "Buscar…";
-  search.className = "w-full rounded-lg border border-gray-200 px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
-  searchWrap.appendChild(search);
-  panel.appendChild(searchWrap);
+  search.className = "fs-portal-search";
+  header.appendChild(search);
 
   const list = document.createElement("div");
-  list.className = "max-h-64 overflow-auto space-y-1";
-  panel.appendChild(list);
+  list.className = "fs-portal-list";
 
-  wrapper.appendChild(panel);
+  panel.append(header, list);
+  document.body.appendChild(panel);
 
+  // ===== helpers =====
   function readOptions() {
     return Array.from(nativeSelect.options).map(o => ({
-      value: o.value, label: o.textContent.trim(), disabled: o.disabled, selected: o.selected
+      value: o.value,
+      label: o.textContent.trim(),
+      disabled: o.disabled,
+      selected: o.selected
     }));
   }
+
   function renderList(filter = "") {
     const q = filter.trim().toLowerCase();
     list.innerHTML = "";
@@ -122,15 +162,14 @@ function upgradeSelect(nativeSelect, opts = {}) {
       const row = document.createElement("button");
       row.type = "button";
       row.className = [
-        "w-full text-left px-3 py-2 rounded-lg",
-        opt.disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-50",
-        "flex items-center gap-2 border border-transparent"
+        "fs-portal-row",
+        opt.disabled ? "opacity-40 cursor-not-allowed" : ""
       ].join(" ");
       row.disabled = !!opt.disabled;
       row.dataset.value = opt.value;
 
       const mark = document.createElement("span");
-      mark.className = "shrink-0 w-4";
+      mark.className = "fs-portal-mark";
       mark.textContent = opt.selected ? "•" : "";
       const lbl = document.createElement("span");
       lbl.textContent = opt.label;
@@ -153,6 +192,7 @@ function upgradeSelect(nativeSelect, opts = {}) {
       list.appendChild(row);
     });
   }
+
   function syncControl() {
     const opts = readOptions().filter(o => o.selected);
     chips.innerHTML = "";
@@ -187,34 +227,75 @@ function upgradeSelect(nativeSelect, opts = {}) {
       }
     }
   }
+
+  function positionPanel() {
+    const r = control.getBoundingClientRect();
+    // ancho del panel = ancho del control; posición bajo el control
+    panel.style.width = `${Math.max(r.width, 200)}px`;
+    panel.style.left = `${Math.round(r.left)}px`;
+    panel.style.top = `${Math.round(r.bottom + 6)}px`;
+  }
+
+  function closeAllOthers() {
+    document.querySelectorAll(".fs-portal-panel.open").forEach(p => {
+      if (p !== panel) {
+        p.classList.remove("open");
+        p.style.top = "-9999px";
+        p.style.left = "-9999px";
+      }
+    });
+  }
+
   function open() {
-    panel.classList.remove("pointer-events-none");
-    panel.style.opacity = "1";
-    panel.style.transform = "scale(1)";
+    closeAllOthers();
+    renderList(search.value);
+    positionPanel();
+    panel.classList.add("open");
     caret.style.transform = "rotate(180deg)";
     search.focus();
-  }
-  function close() {
-    panel.classList.add("pointer-events-none");
-    panel.style.opacity = "0";
-    panel.style.transform = "scale(.95)";
-    caret.style.transform = "rotate(0deg)";
-  }
-  function toggle() {
-    const openNow = panel.style.opacity === "1";
-    openNow ? close() : open();
+
+    // re-posicionar mientras se desplaza o redimensiona
+    window.addEventListener("scroll", onScrollResize, true);
+    window.addEventListener("resize", onScrollResize, { passive: true });
   }
 
-  control.addEventListener("click", toggle);
+  function close() {
+    panel.classList.remove("open");
+    caret.style.transform = "rotate(0deg)";
+    panel.style.top = "-9999px";
+    panel.style.left = "-9999px";
+    window.removeEventListener("scroll", onScrollResize, true);
+    window.removeEventListener("resize", onScrollResize);
+  }
+
+  function onScrollResize() {
+    if (panel.classList.contains("open")) positionPanel();
+  }
+
+  function toggle() {
+    panel.classList.contains("open") ? close() : open();
+  }
+
+  // eventos
+  control.addEventListener("click", (e) => {
+    e.preventDefault();
+    toggle();
+  });
   search.addEventListener("input", () => renderList(search.value));
-  document.addEventListener("click", (e) => { if (!wrapper.contains(e.target)) close(); });
+  document.addEventListener("click", (e) => {
+    const inside = wrapper.contains(e.target) || panel.contains(e.target);
+    if (!inside) close();
+  });
+
   nativeSelect.addEventListener("change", () => { syncControl(); renderList(search.value); });
 
+  // init
   syncControl();
   renderList();
 
   nativeSelect._fancy = { wrapper, control, open, close, sync: syncControl, isFancy: true };
 }
+
 
 /* ===========================================================
    SKIN / MODERN LOOK & FEEL (sin cambiar funcionalidad)
@@ -354,6 +435,102 @@ function showConfirm({ title = "Confirmar", message = "", confirmText = "Aceptar
 /* =========================
    Helpers: limpiar / snapshots / locks mesas / API mesa
    ========================= */
+
+async function tryFetchJson(url){
+  try{
+    const r = await fetch(url, { credentials: "include" });
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json().catch(() => null);
+  }catch(_){ return null; }
+}
+
+function getCookie(name){
+  const m = document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+async function resolveLoggedInWaiter(){
+  // 1) cache de esta pantalla
+  try{
+    const cached = JSON.parse(sessionStorage.getItem("ord_waiter") || "null");
+    if(cached && Number(cached.idEmpleado) > 0 && cached.username) return cached;
+  }catch{}
+
+  // 2) cache anterior (si tú lo guardabas)
+  try{
+    const u = JSON.parse(sessionStorage.getItem("ord_user") || "null");
+    if (u && (u.idEmpleado || (u.empleado && u.empleado.id))){
+      const obj = {
+        idEmpleado: Number(u.idEmpleado ?? u.empleado?.id),
+        username: String(u.username ?? u.usuario ?? u.user ?? u.nombreUsuario ?? u.nombre ?? `Empleado #${u.idEmpleado}`),
+        email: String(u.email ?? u.correo ?? u.mail ?? "")
+      };
+      if (Number.isFinite(obj.idEmpleado) && obj.idEmpleado>0) {
+        sessionStorage.setItem("ord_waiter", JSON.stringify(obj));
+        return obj;
+      }
+    }
+  }catch{}
+
+  // 3) intenta endpoints comunes de "me"
+  const API = "http://localhost:8080";
+  const ME_CANDIDATES = [
+    "/api/auth/me"
+  ];
+  for (const path of ME_CANDIDATES){
+    const data = await tryFetchJson(`${API}${path}`);
+    if (data){
+      const idEmpleado = Number(
+        data.idEmpleado ?? data.empleadoId ?? data.idEmpleadoFk ??
+        data.id_empleado ?? data.idEmpleadoUsuario ?? data.empleado?.id
+      );
+      const username = String(
+        data.username ?? data.usuario ?? data.user ?? data.nombreUsuario ?? data.nombre ?? ""
+      ).trim();
+      const email = String(data.email ?? data.correo ?? data.mail ?? data.userEmail ?? "").trim();
+
+      if (Number.isFinite(idEmpleado) && idEmpleado>0 && username){
+        const obj = { idEmpleado, username, email };
+        sessionStorage.setItem("ord_waiter", JSON.stringify(obj));
+        return obj;
+      }
+      // si solo trae email, lo usamos más abajo
+      if (email) var meEmail = email;
+    }
+  }
+
+  // 4) intenta extraer email desde cookie JWT (si existe)
+  let email = (typeof meEmail !== "undefined") ? meEmail : "";
+  if (!email){
+    const token = getCookie("jwt") || getCookie("token") || getCookie("access_token") || getCookie("Authorization");
+    const payload = token ? tryDecodeJwt(token) : null;
+    email = String(payload?.email ?? payload?.sub ?? payload?.user_email ?? "").trim();
+  }
+
+  // 5) si tenemos email, buscamos el usuario para sacar idEmpleado/username
+  if (email){
+    const users = await tryFetchJson(`${API}/apiUsuario/getDataUsuario?page=0&size=1000`);
+    const list = Array.isArray(users?.content) ? users.content : (Array.isArray(users) ? users : []);
+    const u = list.find(x => {
+      const mail = String(x.email ?? x.correo ?? x.mail ?? "").trim().toLowerCase();
+      return mail && mail === email.toLowerCase();
+    });
+    if (u){
+      const idEmpleado = Number(u.idEmpleado ?? u.empleadoId ?? u.id_empleado ?? u.empleado?.id);
+      const username  = String(u.username ?? u.usuario ?? u.user ?? u.nombreUsuario ?? u.nombre ?? "").trim();
+      if (Number.isFinite(idEmpleado) && idEmpleado>0 && username){
+        const obj = { idEmpleado, username, email };
+        sessionStorage.setItem("ord_waiter", JSON.stringify(obj));
+        return obj;
+      }
+    }
+  }
+
+  // 6) último recurso: nada encontrado
+  return null;
+}
+
+
 function clearSnapshots() {
   localStorage.removeItem(K_CLIENTE);
   localStorage.removeItem(K_MESA);
@@ -646,55 +823,44 @@ async function cargarCatalogos() {
 /* =========================
    Mesero (autocompletado + bloqueado)
    ========================= */
-async function cargarEmpleados(waiterSelect, opts = {}) {
+// === MOSTRAR SOLO EL USUARIO LOGUEADO, BLOQUEADO ===
+// Reemplaza el select por un único valor bloqueado: el usuario logueado (username)
+// No consulta /apiEmpleado; usa /api/auth/me y lo deja bloqueado
+// =========================
+// Mesero (bloqueado con el usuario logueado)
+// =========================
+async function cargarEmpleados(waiterSelect) {
   if (!waiterSelect) return;
-  const { initialId = null } = opts;
 
-  const url = `${API_HOST}/apiEmpleado/getDataEmpleado?page=0&size=50`;
+  // Forzar siempre una lectura fresca del backend para evitar "quedarse" con la sesión anterior.
+  const me = await ensureMeInSession({ forceNetwork: true });
 
-  let empleados = [];
-  try {
-    const res = await fetch(url, { credentials: "include" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json().catch(() => ({}));
-    empleados = Array.isArray(data?.content) ? data.content : (Array.isArray(data) ? data : []);
-  } catch (e) {
-    console.error("[Empleados] Error al obtener empleados:", e);
-  }
-
-  // Elegir ID preferido
-  let preferredId = null;
-  if (Number.isFinite(Number(initialId))) preferredId = Number(initialId);
-  else {
-    try {
-      const user = JSON.parse(sessionStorage.getItem("ord_user") || "null");
-      if (user && Number.isFinite(Number(user.id))) preferredId = Number(user.id);
-    } catch { }
-  }
-  if (!preferredId && empleados.length) preferredId = Number(empleados[0].id ?? empleados[0].Id);
-
-  // Etiqueta legible
-  let label = `Empleado #${preferredId || "-"}`;
-  try {
-    const user = JSON.parse(sessionStorage.getItem("ord_user") || "null");
-    if (user && Number(user.id) === preferredId) {
-      label = `${user.nombre || label}${user.username ? " — " + user.username : ""}`;
-    }
-  } catch { }
+  const label = me?.username || me?.correo || "Sesión no identificada";
+  const value = me?.idEmpleado || me?.usuarioId || "";
 
   waiterSelect.innerHTML = "";
   const opt = document.createElement("option");
-  opt.value = preferredId ? String(preferredId) : "";
+  opt.value = value ? String(value) : "";
   opt.textContent = label;
   opt.selected = true;
   waiterSelect.appendChild(opt);
 
+  // Dejarlo bloqueado/readonly (accesible)
   waiterSelect.disabled = true;
-  waiterSelect.title = "Se completa automáticamente con el mesero de la cuenta / pedido.";
+  waiterSelect.title = "Se completa automáticamente con el usuario que inició sesión.";
   waiterSelect.className =
     "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 text-sm md:text-base bg-gray-100 shadow-sm cursor-not-allowed";
-  if (typeof upgradeSelect === "function") upgradeSelect(waiterSelect, { placeholder: "Mesero" });
+
+  // Mantener el look del select "fancy" (etiqueta visible y deshabilitado)
+  if (typeof upgradeSelect === "function") {
+    upgradeSelect(waiterSelect, { placeholder: "Mesero" });
+    waiterSelect._fancy?.sync?.();
+  }
 }
+
+
+
+
 
 /* =========================
    Mesas (select con estado)
@@ -1178,6 +1344,77 @@ function renderOrdersList(container, onAddCard) {
 /* =========================
    Masonry helpers (flex + columnas fijas)
    ========================= */
+
+// --- helpers mínimos para resolver el usuario logueado --- //
+
+function tryDecodeJwt(token){
+  try{
+    const p = token.split('.')[1];
+    const s = atob(p.replace(/-/g,'+').replace(/_/g,'/'));
+    return JSON.parse(s);
+  }catch(_){ return null; }
+}
+
+function findJwtPayloadFromCookies(){
+  // busca cualquier cookie con pinta de JWT (con dos puntos)
+  const parts = document.cookie.split(';').map(s => s.trim());
+  for (const kv of parts){
+    const val = kv.split('=').slice(1).join('=');
+    if (!val) continue;
+    if (val.split('.').length === 3){
+      const payload = tryDecodeJwt(val);
+      if (payload) return payload;
+    }
+  }
+  // fallback a nombres típicos
+  const cand = getCookie("jwt") || getCookie("token") || getCookie("access_token") || getCookie("Authorization");
+  return cand ? tryDecodeJwt(cand) : null;
+}
+
+/** Devuelve { idEmpleado, username, email } o null */
+async function resolveLoggedInWaiterStrict(){
+  // cache local de esta pantalla
+  try{
+    const c = JSON.parse(sessionStorage.getItem("ord_waiter") || "null");
+    if (c && Number(c.idEmpleado) > 0 && c.username) return c;
+  }catch{}
+
+  // muchos setups guardan algo tipo "ord_user" al loguear
+  try{
+    const u = JSON.parse(sessionStorage.getItem("ord_user") || "null");
+    if (u){
+      const idEmpleado = Number(u.idEmpleado ?? u.empleado?.id ?? u.empleadoId ?? u.id_empleado);
+      const username = String(u.username ?? u.usuario ?? u.user ?? u.nombreUsuario ?? u.nombre ?? "").trim();
+      const email = String(u.email ?? u.correo ?? "").trim();
+      if (Number.isFinite(idEmpleado) && idEmpleado>0 && username){
+        const obj = { idEmpleado, username, email };
+        sessionStorage.setItem("ord_waiter", JSON.stringify(obj));
+        return obj;
+      }
+    }
+  }catch{}
+
+  // intenta extraer del JWT
+  const payload = findJwtPayloadFromCookies();
+  if (payload){
+    const email = String(payload.email ?? payload.correo ?? payload.sub ?? "").trim();
+    const username = String(payload.username ?? payload.usuario ?? payload.name ?? payload.nickname ?? "").trim();
+    const idEmpleado = Number(
+      payload.idEmpleado ?? payload.empleadoId ?? payload.id_empleado ?? payload.idEmpleadoUsuario
+    );
+    if (Number.isFinite(idEmpleado) && idEmpleado>0 && username){
+      const obj = { idEmpleado, username, email };
+      sessionStorage.setItem("ord_waiter", JSON.stringify(obj));
+      return obj;
+    }
+  }
+
+  // sin fallback a catálogos (lo pediste explícito): si no hay sesión, null
+  return null;
+}
+
+
+
 function computeColCount(container){
   // Calcula cuántas columnas caben según --card-min
   const styles = getComputedStyle(container);
@@ -1229,6 +1466,11 @@ function layoutMasonryColumns(container, items, onAddCard){
   });
 }
 
+// Guarda en sessionStorage el usuario logueado { id, username, correo } leyendo /api/auth/me
+// Refresca SIEMPRE contra /api/auth/me (sin caché del navegador).
+
+
+
 function ensureMasonryResizeHandler(container){
   if (container._masonryResizeAttached) return;
   container._masonryResizeAttached = true;
@@ -1257,9 +1499,19 @@ function fmtFechaCorta(s) {
   } catch { return String(s); }
 }
 function getEmpleadoNombre(idEmp) {
+  const me = (() => {
+    try { return JSON.parse(sessionStorage.getItem("ord_user") || "null"); } catch { return null; }
+  })();
+
+  if (me && Number(me.idEmpleado) === Number(idEmp) && (me.username || me.correo)) {
+    return me.username || me.correo;
+  }
+
   const emp = MAP_EMPLEADOS.get(Number(idEmp));
   return emp?.nombre || (idEmp ? `Empleado #${idEmp}` : "—");
 }
+
+
 function badgeColorForEstado(nombre) {
   const n = (nombre || "").toLowerCase();
   if (n.includes("pend")) return "bg-yellow-100 text-yellow-800 ring-yellow-200";
@@ -1520,7 +1772,7 @@ function agregarTarjetaPedido(pedido, container) {
     withScrollFreeze(() => setExpanded(card.dataset.expanded !== "1"));
   });
 
-  // Eliminar => backend y luego RELAYOUT completo
+  // Eliminar
   card.querySelector(".btn-eliminar").addEventListener("click", async (ev) => {
     ev.stopPropagation();
     const ok = await showConfirm({
@@ -1533,51 +1785,98 @@ function agregarTarjetaPedido(pedido, container) {
     if (!ok) { showAlert("info", "Operación cancelada"); return; }
     try {
       await deletePedido(pedido.id);
+      card.remove();
       showAlert("success", "Pedido eliminado correctamente");
       const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
       if (idMesa) await liberarMesa(idMesa);
-      await reloadOrdersList(); // ← reordenar todo
     } catch (e) {
       showAlert("error", e.message || "No se pudo eliminar el pedido");
     }
   });
 
-  // Editar => abrir en overlay
+  // Editar
   card.querySelector(".btn-editar").addEventListener("click", (ev) => {
     ev.stopPropagation();
-    abrirEdicionDesdeCard(pedido);   // esta función ahora abre overlay
+    abrirEdicionDesdeCard(pedido);
   });
 
-  // Cambiar estado => actualiza y reordena lista completa
+  // Select de estado (usa portal + z-index via upgradeSelect)
   const selEstado = card.querySelector(`#sel-estado-${pedido.id}`);
   upgradeSelect?.(selEstado, { placeholder: "Estado" });
+
   selEstado.addEventListener("change", async () => {
     const newId = Number(selEstado.value);
     if (!Number.isFinite(newId) || newId <= 0) return;
+
+    // Items mínimos para que el backend permita actualizar
     const det = (pedido.Platillos || [])
       .filter(pl => Number.isFinite(Number(pl.idPlatillo)))
-      .map(pl => ({ idPlatillo: Number(pl.idPlatillo), cantidad: Math.max(1, Number(pl.cantidad || pl.qty || 1)), precioUnitario: Number(pl.precio || 0) }));
-    if (!det.length) { showAlert("error", "El pedido no tiene items para actualizar."); selEstado.value = String(pedido.idEstadoPedido); selEstado._fancy?.sync?.(); return; }
+      .map(pl => ({
+        idPlatillo: Number(pl.idPlatillo),
+        cantidad: Math.max(1, Number(pl.cantidad || pl.qty || 1)),
+        precioUnitario: Number(pl.precio || 0)
+      }));
+    if (!det.length) {
+      showAlert("error", "El pedido no tiene items para actualizar.");
+      selEstado.value = String(pedido.idEstadoPedido); selEstado._fancy?.sync?.();
+      return;
+    }
+
+    // >>> IMPORTANTE: el backend valida FPedido != null
+    // Tomamos la hora original si existe; si no, usamos 'ahora'
+    let isoFecha = null;
+    try {
+      const raw = pedido.Hora || pedido.FPedido || pedido.fpedido || pedido.fecha || pedido.fechaPedido || null;
+      const d = raw ? new Date(String(raw).replace(" ", "T")) : null;
+      isoFecha = formatDateTimeForApi(d && !isNaN(d.getTime()) ? d : new Date());
+    } catch { isoFecha = formatDateTimeForApi(new Date()); }
 
     try {
       await updatePedido(pedido.id, {
+        // obligatorios / usados por tu DTO
         nombreCliente: pedido.Cliente || "Cliente",
         idMesa: Number(pedido.idMesa || pedido.Mesa || 0),
         idEmpleado: Number(pedido.idEmpleado || 0),
         idEstadoPedido: newId,
         observaciones: pedido.Observaciones || "Sin observaciones",
         propina: Number(pedido._propina || 0),
-        items: det
+        items: det,
+        // compatibilidad con backend: FPedido requerido; enviamos también horaInicio por si mapeas así
+        FPedido: isoFecha,
+        horaInicio: isoFecha
       });
-      showAlert("success", "Estado actualizado");
-      await reloadOrdersList(); // ← reordenar todo tras el cambio
+
+      // UI local tras éxito
+      pedido.idEstadoPedido = newId;
+      const newName = MAP_ESTADOS.get(newId)?.nombre || "";
+      pedido.Estado = newName;
+
+      const badge = card.querySelector(".o-badge");
+      if (badge) {
+        badge.className = `o-badge ring ${badgeColorForEstado(newName)}`;
+        badge.lastElementChild.textContent = newName || "—";
+      }
+      card.style.setProperty("--accent", accentForEstado(newName));
+
+      const n = (newName || "").toLowerCase();
+      if (n.includes("pag") || n.includes("entreg")) {
+        const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
+        if (idMesa) await liberarMesa(idMesa);
+      }
+
+      selEstado._fancy?.sync?.();
+      if (card.dataset.expanded === "1") extra.style.maxHeight = extra.scrollHeight + "px";
+      showAlert("success", `Estado actualizado a "${newName}"`);
+
     } catch (e) {
+      // Volver al estado anterior en caso de error
       selEstado.value = String(pedido.idEstadoPedido);
       selEstado._fancy?.sync?.();
       showAlert("error", e.message || "No se pudo cambiar el estado");
     }
   });
 }
+
 
 
 
@@ -1950,6 +2249,8 @@ async function init() {
   // 2) Cargar selects por defecto
   await cargarEmpleados(waiterSelect);
   await cargarMesasSelect();
+
+  await ensureMeInSession({ forceNetwork: true });
 
   // 3) Abrir “nuevo pedido”
   newOrderBtn?.addEventListener("click", () => {
