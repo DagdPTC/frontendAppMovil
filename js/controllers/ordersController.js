@@ -361,6 +361,60 @@ function clearSnapshots() {
   sessionStorage.removeItem(K_OPEN_FORM);
 }
 
+/* =========================
+   Overlay helpers
+   ========================= */
+function openOrderFormOverlay(){
+  ensureOrderOverlayStyles();
+  let overlay = document.getElementById("order-overlay");
+  if (!overlay){
+    overlay = document.createElement("div");
+    overlay.id = "order-overlay";
+    overlay.innerHTML = `<div id="order-sheet"></div>`;
+    document.body.appendChild(overlay);
+  }
+  const sheet = overlay.querySelector("#order-sheet");
+  const form = document.getElementById("new-order-form");
+  if (!form || !sheet) return;
+
+  // Guardamos el padre original para poder devolverlo
+  if (!form._homeParent){
+    form._homeParent = form.parentElement;
+    form._homeNext = form.nextSibling; // para insertar en su posición original
+  }
+  sheet.appendChild(form);
+  overlay.classList.add("open");
+
+  // Asegura foco/scroll al inicio del form
+  form.scrollTop = 0;
+  form.querySelector("input, select, textarea, button")?.focus?.();
+}
+
+function closeOrderFormOverlay(){
+  const overlay = document.getElementById("order-overlay");
+  const form = document.getElementById("new-order-form");
+  if (overlay && form && form._homeParent){
+    if (form._homeNext && form._homeNext.parentNode === form._homeParent){
+      form._homeParent.insertBefore(form, form._homeNext);
+    } else {
+      form._homeParent.appendChild(form);
+    }
+  }
+  overlay?.classList.remove("open");
+}
+
+/* =========================
+   Recargar pedidos + relayout masonry
+   ========================= */
+async function reloadOrdersList(){
+  const container = document.getElementById("orders-list");
+  if (!container) return;
+  container.innerHTML = "";
+  await cargarPedidosDeApi(container, agregarTarjetaPedido); // ya rehace masonry
+  ensureFilterBar(); // mantiene la barra
+}
+
+
 // Evita que el viewport "salte" cuando cambia la altura
 function withScrollFreeze(fn) {
   const x = window.scrollX, y = window.scrollY;
@@ -389,37 +443,53 @@ window.addEventListener('load', recalcExpandedHeights);
 /* =========================
    Masonry por columnas (NO grid-auto-rows)
    ========================= */
+/* =========================
+   Masonry por columnas (FLEX, sin reequilibrado automático)
+   ========================= */
+/* =========================
+   Masonry por columnas (GRID, sin scroll lateral)
+   ========================= */
 (function ensureMasonryStyles() {
-  if (document.getElementById("orders-masonry-styles")) return;
+  const ID = "orders-masonry-styles";
+  const old = document.getElementById(ID);
+  if (old) old.remove();
+
   const st = document.createElement("style");
-  st.id = "orders-masonry-styles";
+  st.id = ID;
   st.textContent = `
-    /* Contenedor: multi-column. Al crecer la pantalla, caben más columnas automáticamente */
+    /* Contenedor: grid de N columnas iguales, sin overflow horizontal */
     #orders-list.orders-masonry{
-      display: block;
-      column-gap: 16px;
-      column-width: 300px; /* ↓ baja o sube este número para variar cuántas por fila */
-      overflow-anchor: none;
-      padding-top: 4px;
+      --col-count: 1;
+      --gap: 16px;
+      --card-min: 300px;   /* usado sólo para calcular N columnas */
+      display: grid;
+      grid-template-columns: repeat(var(--col-count), minmax(0, 1fr));
+      column-gap: var(--gap);
+      row-gap: 16px;
+      width: 100%;
+      max-width: 100%;
+      overflow-x: hidden;   /* ¡nada de scroll lateral! */
+      align-items: start;
     }
     @media (min-width: 1400px){
-      #orders-list.orders-masonry{ column-width: 340px; column-gap: 20px; }
+      #orders-list.orders-masonry{ --gap: 20px; --card-min: 340px; }
     }
     @media (max-width: 768px){
-      #orders-list.orders-masonry{ column-width: 100%; column-gap: 14px; }
+      #orders-list.orders-masonry{ --gap: 14px; --card-min: 100%; } /* fuerza 1 col */
     }
 
-    /* Cada tarjeta ocupa SU columna, no se parte ni se estira */
-    #orders-list.orders-masonry > .o-card{
-      display: block;
-      width: auto;
-      break-inside: avoid;
-      -webkit-column-break-inside: avoid;
-      margin: 0 0 16px;
-      vertical-align: top;
+    /* Cada columna es un stack vertical */
+    #orders-list.orders-masonry .m-col{
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 0; /* evita desbordes por contenido */
     }
 
-    /* Animación del expandible */
+    /* Por seguridad: no permitir .o-card suelta en el grid raíz */
+    #orders-list.orders-masonry > .o-card{ display:none !important; }
+
+    /* Animación del expandible (igual que antes) */
     .o-extra{
       overflow: hidden;
       transition: max-height .32s ease, opacity .20s ease;
@@ -430,6 +500,8 @@ window.addEventListener('load', recalcExpandedHeights);
   `;
   document.head.appendChild(st);
 })();
+
+
 
 /* (ELIMINADO) — No usamos grid-auto-rows ni spans personalizados */
 
@@ -689,6 +761,7 @@ function getEstadoMesaNormalized(m) {
 }
 
 // Carga mesas con estado real
+// Carga mesas con estado real (robusto si pedidos/estados fallan)
 async function cargarMesasSelect(opts = {}) {
   const { allowCurrentId = null } = opts;
   const sel = document.getElementById("table-select");
@@ -699,9 +772,9 @@ async function cargarMesasSelect(opts = {}) {
   sel.innerHTML = `<option value="" disabled selected>Seleccione una mesa disponible…</option>`;
 
   const urlMesas = `${API_HOST}/apiMesa/getDataMesa?page=0&size=50`;
-  const urlEM = `${API_HOST}/apiEstadoMesa/getDataEstadoMesa?page=0&size=50`;
-  const urlPed = `${API_HOST}/apiPedido/getDataPedido?page=0&size=50`;
-  const urlEP = `${API_HOST}/apiEstadoPedido/getDataEstadoPedido?page=0&size=50`;
+  const urlEM   = `${API_HOST}/apiEstadoMesa/getDataEstadoMesa?page=0&size=50`;
+  const urlPed  = `${API_HOST}/apiPedido/getDataPedido?page=0&size=50`;
+  const urlEP   = `${API_HOST}/apiEstadoPedido/getDataEstadoPedido?page=0&size=50`;
 
   const getId = (o) => Number(o.id ?? o.Id);
   const nomMesa = (m) => String(m.nomMesa ?? `Mesa ${getId(m)}`);
@@ -711,30 +784,59 @@ async function cargarMesasSelect(opts = {}) {
   const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s);
 
   let mesas = [], estadosMesa = [], pedidos = [], estadosPed = [];
+
+  // Cargamos cada cosa de forma independiente para no romper si una falla
   try {
-    const [rM, rEM, rP, rEP] = await Promise.all([
-      fetch(urlMesas, { credentials: "include" }),
-      fetch(urlEM, { credentials: "include" }),
-      fetch(urlPed, { credentials: "include" }),
-      fetch(urlEP, { credentials: "include" }),
-    ]);
-    if (!rM.ok || !rEM.ok || !rP.ok || !rEP.ok) throw new Error("HTTP error");
-    const [dM, dEM, dP, dEP] = await Promise.all([rM.json(), rEM.json(), rP.json(), rEP.json()]);
-    mesas = Array.isArray(dM?.content) ? dM.content : (Array.isArray(dM) ? dM : []);
-    estadosMesa = Array.isArray(dEM?.content) ? dEM.content : (Array.isArray(dEM) ? dEM : []);
-    pedidos = Array.isArray(dP?.content) ? dP.content : (Array.isArray(dP) ? dP : []);
-    estadosPed = Array.isArray(dEP?.content) ? dEP.content : (Array.isArray(dEP) ? dEP : []);
+    const rM = await fetch(urlMesas, { credentials: "include" });
+    if (rM.ok) {
+      const dM = await rM.json().catch(() => ({}));
+      mesas = Array.isArray(dM?.content) ? dM.content : (Array.isArray(dM) ? dM : []);
+    }
   } catch (e) {
-    console.error("[Mesas] Error al obtener datos:", e);
-    if (typeof upgradeSelect === "function") upgradeSelect(sel, { placeholder: "Mesa" });
-    return;
+    console.error("[Mesas] Error obteniendo mesas:", e);
+  }
+
+  try {
+    const rEM = await fetch(urlEM, { credentials: "include" });
+    if (rEM.ok) {
+      const dEM = await rEM.json().catch(() => ({}));
+      estadosMesa = Array.isArray(dEM?.content) ? dEM.content : (Array.isArray(dEM) ? dEM : []);
+  } } catch (e) {
+    console.error("[Mesas] Error obteniendo estados de mesa:", e);
+  }
+
+  try {
+    const rEP = await fetch(urlEP, { credentials: "include" });
+    if (rEP.ok) {
+      const dEP = await rEP.json().catch(() => ({}));
+      estadosPed = Array.isArray(dEP?.content) ? dEP.content : (Array.isArray(dEP) ? dEP : []);
+    }
+  } catch (e) {
+    console.error("[Mesas] Error obteniendo estados de pedido:", e);
+  }
+
+  // Pedidos es el que te estaba fallando: lo envolvemos y si hay error continuamos sin bloquear la UI
+  try {
+    const rP = await fetch(urlPed, { credentials: "include" });
+    if (rP.ok) {
+      const dP = await rP.json().catch(() => ({}));
+      pedidos = Array.isArray(dP?.content) ? dP.content : (Array.isArray(dP) ? dP : []);
+    } else {
+      console.warn("[Mesas] No se pudieron obtener pedidos (status", rP.status, "). Continuamos sin bloquear la lista de mesas.");
+      pedidos = []; // fallback
+    }
+  } catch (e) {
+    console.warn("[Mesas] Error obteniendo pedidos. Continuamos sin bloquear:", e?.message || e);
+    pedidos = []; // fallback
   }
 
   const MAP_ID_ESTADO_MESA_NOMBRE = new Map(estadosMesa.map(e => [getId(e), nomEstadoMesa(e)]));
-  const MAP_ID_ESTADO_PED_NOMBRE = new Map(estadosPed.map(e => [getId(e), nomEstadoPedido(e)]));
+  const MAP_ID_ESTADO_PED_NOMBRE  = new Map(estadosPed.map(e => [getId(e), nomEstadoPedido(e)]));
 
   let idDisponible = null;
-  for (const e of estadosMesa) { if (nomEstadoMesa(e).toLowerCase().includes("dispon")) { idDisponible = getId(e); break; } }
+  for (const e of estadosMesa) {
+    if (nomEstadoMesa(e).toLowerCase().includes("dispon")) { idDisponible = getId(e); break; }
+  }
   if (idDisponible == null) {
     console.warn("[Mesas] No hay estado 'Disponible' en catálogo.");
     if (typeof upgradeSelect === "function") upgradeSelect(sel, { placeholder: "Mesa" });
@@ -744,12 +846,13 @@ async function cargarMesasSelect(opts = {}) {
   const esPedidoCerrado = (nombre) => {
     const s = (nombre || "").toLowerCase();
     return s.includes("pag") || s.includes("final") || s.includes("cancel") ||
-      s.includes("cerr") || s.includes("entreg") || s.includes("complet") ||
-      s.includes("rechaz") || s.includes("anul");
+           s.includes("cerr") || s.includes("entreg") || s.includes("complet") ||
+           s.includes("rechaz") || s.includes("anul");
   };
 
+  // Si pedidos viene vacío por auth, simplemente NO bloqueamos mesas por pedidos
   const mesasConPedidoActivo = new Set(
-    pedidos
+    (pedidos || [])
       .filter(p => !esPedidoCerrado(MAP_ID_ESTADO_PED_NOMBRE.get(Number(p.idEstadoPedido ?? p.IdEstadoPedido)) || ""))
       .map(p => Number(p.idMesa ?? p.IdMesa))
       .filter(Boolean)
@@ -792,12 +895,14 @@ async function cargarMesasSelect(opts = {}) {
   if (typeof upgradeSelect === "function") upgradeSelect(sel, { placeholder: "Mesa" });
 }
 
+
 /* =========================
    Normalizador pedido UI
    ========================= */
 function fromApi(p) {
   const id = Number(p.id ?? p.Id ?? p.idPedido ?? p.ID);
-  const fecha = (p.fpedido ?? p.FPedido ?? p.fecha ?? p.fechaPedido ?? "").toString();
+  const fecha = (p.fpedido ?? p.FPedido ?? p.fechaPedido ?? p.fecha ?? "").toString();
+  const horaFin = (p.horaFin ?? p.HoraFin ?? p.horafin ?? null);
   const estadoId = Number(p.idEstadoPedido ?? p.IdEstadoPedido ?? p.estadoId ?? 0);
   const estadoNombre = MAP_ESTADOS.get(estadoId)?.nombre || "";
   const nombreCliente = (p.nombreCliente ?? p.nombrecliente ?? p.Cliente ?? p.cliente ?? "").toString();
@@ -819,17 +924,6 @@ function fromApi(p) {
         precio: Number(pu ?? info?.precio ?? 0)
       };
     });
-  } else {
-    const idPlat = Number(p.idPlatillo ?? p.IdPlatillo ?? 0);
-    const cant = Number(p.cantidad ?? p.Cantidad ?? 1);
-    const info = MAP_PLATILLOS.get(idPlat);
-    platillos = idPlat ? [{
-      idPlatillo: idPlat,
-      idDetalle: undefined,
-      nombre: info?.nomPlatillo ?? (p.platillo?.nomPlatillo ?? p.nomPlatillo ?? "Platillo"),
-      cantidad: cant,
-      precio: Number(info?.precio ?? 0)
-    }] : [];
   }
 
   const subtotalCalc = platillos.reduce((acc, x) => acc + (Number(x.precio) || 0) * (Number(x.cantidad) || 0), 0);
@@ -842,7 +936,8 @@ function fromApi(p) {
     Cliente: nombreCliente,
     Mesa: String(idMesa || ""),
     Mesero: "",
-    Hora: fecha,
+    Hora: fecha,                // HORA_INICIO
+    HoraFin: horaFin || null,   // HORA_FIN (puede venir null)
     Estado: estadoNombre,
     Platillos: platillos,
     _subtotal: subtotal,
@@ -856,6 +951,8 @@ function fromApi(p) {
     Observaciones: (p.observaciones ?? p.Observaciones ?? "").toString()
   };
 }
+
+
 
 function getUniqueMesasFromCache() {
   const set = new Set(ORDERS_CACHE.map(o => Number(o.Mesa || o.idMesa || 0)).filter(Boolean));
@@ -1057,7 +1154,7 @@ function aplicarFiltros(arr) {
 
 function renderOrdersList(container, onAddCard) {
   const list = aplicarFiltros(ORDERS_CACHE);
-  container.innerHTML = "";
+  container.classList.add("orders-masonry");
 
   if (!list.length) {
     container.innerHTML = `
@@ -1070,12 +1167,84 @@ function renderOrdersList(container, onAddCard) {
     return;
   }
 
-  list.forEach(p => { try { onAddCard(p, container); } catch { } });
+  // Guardamos para re-layout en resize
+  container._masonryData = { items: list, onAddCard };
+  layoutMasonryColumns(container, list, onAddCard);
+  ensureMasonryResizeHandler(container);
+}
 
-  requestAnimationFrame(() => {
-    recalcExpandedHeights();
+
+
+/* =========================
+   Masonry helpers (flex + columnas fijas)
+   ========================= */
+function computeColCount(container){
+  // Calcula cuántas columnas caben según --card-min
+  const styles = getComputedStyle(container);
+  const minRaw = styles.getPropertyValue('--card-min').trim();
+  let min;
+  if (minRaw.endsWith('%')) {
+    // 100% => 1 columna
+    min = container.clientWidth; 
+  } else {
+    min = parseInt(minRaw) || 300;
+  }
+  const w = container.clientWidth || container.offsetWidth || 0;
+  return Math.max(1, Math.floor(w / Math.max(min, 1)));
+}
+
+
+function layoutMasonryColumns(container, items, onAddCard){
+  container.innerHTML = "";
+  container.classList.add("orders-masonry");
+
+  const colsCount = computeColCount(container);
+  container.style.setProperty('--col-count', String(colsCount)); // <- grid sin overflow
+
+  const cols = [];
+  const heights = [];
+
+  for (let i = 0; i < colsCount; i++){
+    const c = document.createElement("div");
+    c.className = "m-col";
+    container.appendChild(c);
+    cols.push(c);
+    heights.push(0);
+  }
+
+  items.forEach((pedido) => {
+    let idxMin = 0;
+    for (let i = 1; i < cols.length; i++){
+      if (heights[i] < heights[idxMin]) idxMin = i;
+    }
+    const col = cols[idxMin];
+    const before = col.offsetHeight;
+    onAddCard(pedido, col);
+    const after = col.offsetHeight;
+    heights[idxMin] += Math.max(0, after - before);
+  });
+
+  requestAnimationFrame(() => { 
+    typeof recalcExpandedHeights === "function" && recalcExpandedHeights();
   });
 }
+
+function ensureMasonryResizeHandler(container){
+  if (container._masonryResizeAttached) return;
+  container._masonryResizeAttached = true;
+
+  const relayout = throttle(() => {
+    if (!container._masonryData) return;
+    const prevCols = parseInt(getComputedStyle(container).getPropertyValue('--col-count')) || 1;
+    const nextCols = computeColCount(container);
+    if (prevCols !== nextCols){
+      layoutMasonryColumns(container, container._masonryData.items, container._masonryData.onAddCard);
+    }
+  }, 180);
+
+  window.addEventListener("resize", relayout);
+}
+
 
 // === Helpers visuales para las tarjetas ===
 function fmtMoney(n) { return Number(n || 0).toFixed(2); }
@@ -1190,6 +1359,34 @@ function badgeColorForEstado(nombre) {
 })();
 
 /* =========================
+   Overlay para el formulario (estilos)
+   ========================= */
+function ensureOrderOverlayStyles(){
+  if (document.getElementById("order-overlay-styles")) return;
+  const st = document.createElement("style");
+  st.id = "order-overlay-styles";
+  st.textContent = `
+    #order-overlay{
+      position: fixed; inset: 0; z-index: 1000; display: none;
+      align-items: flex-start; justify-content: center;
+      background: rgba(0,0,0,.42); backdrop-filter: blur(2px);
+      padding: 24px 16px; overflow-y: auto;
+    }
+    #order-overlay.open{ display:flex; }
+    #order-sheet{
+      width: min(980px, 96vw);
+      background: #fff; border: 1px solid #e5e7eb; border-radius: 16px;
+      box-shadow: 0 24px 64px rgba(0,0,0,.25);
+      padding: 16px;
+      animation: sheetIn .18s ease;
+    }
+    @keyframes sheetIn{ from{ opacity:0; transform: translateY(8px) } to{ opacity:1; transform:none } }
+  `;
+  document.head.appendChild(st);
+}
+
+
+/* =========================
    Tarjeta de pedido
    ========================= */
 function agregarTarjetaPedido(pedido, container) {
@@ -1294,13 +1491,12 @@ function agregarTarjetaPedido(pedido, container) {
   const toggleBtn = card.querySelector(".o-toggle");
   const chev = toggleBtn.querySelector(".chev");
 
-  // Estado inicial: todas colapsadas por defecto
+  // Estado inicial: colapsada
   card.dataset.expanded = "0";
   extra.style.maxHeight = "0px";
 
   container.appendChild(card);
 
-  // Toggle con animación suave que empuja hacia abajo (en SU columna)
   const setExpanded = (on) => {
     const expanded = !!on;
     card.dataset.expanded = expanded ? "1" : "0";
@@ -1324,7 +1520,7 @@ function agregarTarjetaPedido(pedido, container) {
     withScrollFreeze(() => setExpanded(card.dataset.expanded !== "1"));
   });
 
-  // Acciones eliminar / editar
+  // Eliminar => backend y luego RELAYOUT completo
   card.querySelector(".btn-eliminar").addEventListener("click", async (ev) => {
     ev.stopPropagation();
     const ok = await showConfirm({
@@ -1337,21 +1533,22 @@ function agregarTarjetaPedido(pedido, container) {
     if (!ok) { showAlert("info", "Operación cancelada"); return; }
     try {
       await deletePedido(pedido.id);
-      card.remove();
       showAlert("success", "Pedido eliminado correctamente");
       const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
       if (idMesa) await liberarMesa(idMesa);
+      await reloadOrdersList(); // ← reordenar todo
     } catch (e) {
       showAlert("error", e.message || "No se pudo eliminar el pedido");
     }
   });
 
+  // Editar => abrir en overlay
   card.querySelector(".btn-editar").addEventListener("click", (ev) => {
     ev.stopPropagation();
-    abrirEdicionDesdeCard(pedido);
+    abrirEdicionDesdeCard(pedido);   // esta función ahora abre overlay
   });
 
-  // Select de estado
+  // Cambiar estado => actualiza y reordena lista completa
   const selEstado = card.querySelector(`#sel-estado-${pedido.id}`);
   upgradeSelect?.(selEstado, { placeholder: "Estado" });
   selEstado.addEventListener("change", async () => {
@@ -1372,26 +1569,8 @@ function agregarTarjetaPedido(pedido, container) {
         propina: Number(pedido._propina || 0),
         items: det
       });
-      pedido.idEstadoPedido = newId;
-      const newName = MAP_ESTADOS.get(newId)?.nombre || "";
-      pedido.Estado = newName;
-
-      const badge = card.querySelector(".o-badge");
-      if (badge) {
-        badge.className = `o-badge ring ${badgeColorForEstado(newName)}`;
-        badge.lastElementChild.textContent = newName || "—";
-      }
-      card.style.setProperty("--accent", accentForEstado(newName));
-
-      const n = (newName || "").toLowerCase();
-      if (n.includes("pag") || n.includes("entreg")) {
-        const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
-        if (idMesa) await liberarMesa(idMesa);
-      }
-
-      selEstado._fancy?.sync?.();
-      if (card.dataset.expanded === "1") extra.style.maxHeight = extra.scrollHeight + "px";
-      showAlert("success", `Estado actualizado a "${newName}"`);
+      showAlert("success", "Estado actualizado");
+      await reloadOrdersList(); // ← reordenar todo tras el cambio
     } catch (e) {
       selEstado.value = String(pedido.idEstadoPedido);
       selEstado._fancy?.sync?.();
@@ -1399,6 +1578,9 @@ function agregarTarjetaPedido(pedido, container) {
     }
   });
 }
+
+
+
 
 /* =========================
    Edición
@@ -1464,7 +1646,11 @@ function abrirEdicionDesdeCard(pedido) {
   $("#new-order-form").classList.remove("hidden");
   $("#orders-list").classList.add("hidden");
   $("#new-order-btn").classList.add("hidden");
+
+  // === Abrir como overlay encima de todo
+  openOrderFormOverlay();
 }
+
 
 /* =========================
    Lista
@@ -1686,14 +1872,21 @@ function buildPayloadsFromSelection() {
   const propina = +(subtotal * 0.10).toFixed(2);
   const total = +(subtotal + propina).toFixed(2);
 
-  const observaciones = ($("#order-notes")?.value || "").trim() || "Sin cebolla";
-  const fpedido = formatDateTimeLocal(new Date());
+  const observaciones = ($("#order-notes")?.value || "").trim() || "Sin observaciones";
 
+  // === CAMBIO CLAVE: fecha en ISO local (sirve para LocalDateTime) ===
+  const FPedidoISO = formatDateTimeForApi(new Date());
+  // Si tu DTO fuera LocalDate, podrías usar: const FPedidoISO = todayISODate();
+
+  // Devolvemos FPedido en mayúscula y, por compatibilidad,
+  // añadimos aliases que algunos DTO usan (el backend ignora los desconocidos).
   return {
     totalPedido: Number(total.toFixed(2)),
     subtotal: Number(subtotal.toFixed(2)),
     propina: Number(propina.toFixed(2)),
-    fpedido,
+    FPedido: FPedidoISO,           // ← nombre más probable en tu DTO
+    fpedido: FPedidoISO,           // ← alias por si el DTO está en minúsculas
+    fechaPedido: FPedidoISO,       // ← alias común
     items,
     nombreCliente,
     observaciones,
@@ -1702,6 +1895,8 @@ function buildPayloadsFromSelection() {
     idEstadoPedido
   };
 }
+
+
 
 /* =========================
    Crear / Actualizar
@@ -1736,6 +1931,8 @@ async function actualizarPedido(editId) {
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
+  ensureOrderOverlayStyles();
+
   const ordersList = $("#orders-list");
   const newOrderBtn = $("#new-order-btn");
   const newOrderForm = $("#new-order-form");
@@ -1774,15 +1971,11 @@ async function init() {
     cargarEmpleados(waiterSelect);
     cargarMesasSelect();
 
-    if (location.hash === "#new") history.replaceState({}, "", location.pathname);
-
-    requestAnimationFrame(() => {
-      document.getElementById("new-order-form")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
+    // === Abrir como overlay encima de todo
+    openOrderFormOverlay();
   });
 
-  // 4) Volver a la lista
+  // 4) Volver a la lista / cerrar overlay
   backToOrdersBtn?.addEventListener("click", () => {
     document.getElementById("orders-filters")?.classList.remove("hidden");
 
@@ -1799,9 +1992,12 @@ async function init() {
 
     const saveBtn = $("#save-order-btn");
     if (saveBtn) saveBtn.textContent = "Guardar pedido";
+
+    // Cerrar overlay
+    closeOrderFormOverlay();
   });
 
-  // 5) Ir a seleccionar platillos
+  // 5) Ir a seleccionar platillos (igual)
   addDishesBtn?.addEventListener("click", () => {
     saveFormSnapshot();
     sessionStorage.setItem(K_OPEN_FORM, "1");
@@ -1816,7 +2012,7 @@ async function init() {
     window.location.href = `menu.html?select=1&back=${encodeURIComponent(back)}`;
   });
 
-  // 6) Guardar (crear/actualizar)
+  // 6) Guardar (crear/actualizar) + recargar lista + cerrar overlay
   saveOrderBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
     try {
@@ -1842,8 +2038,9 @@ async function init() {
       ordersList.classList.remove("hidden");
       newOrderBtn.classList.remove("hidden");
 
-      ordersList.innerHTML = "";
-      await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
+      // Cerrar overlay primero, luego recargar/relayout
+      closeOrderFormOverlay();
+      await reloadOrdersList();
       await cargarMesasSelect();
     } catch (err) {
       if (err && err.message !== "VALIDATION") {
@@ -1853,7 +2050,7 @@ async function init() {
     }
   });
 
-  // 7) Reapertura automática del formulario (volviste de menu.html o #new)
+  // 7) Reapertura automática del formulario (al volver de menu.html o #new)
   if (sessionStorage.getItem(K_OPEN_FORM) === "1" || location.hash === "#new") {
     document.getElementById("orders-filters")?.classList.add("hidden");
 
@@ -1889,13 +2086,17 @@ async function init() {
     }
 
     sessionStorage.removeItem(K_OPEN_FORM);
+
+    // Abrir como overlay al reaparecer el formulario
+    openOrderFormOverlay();
   } else {
     renderSeleccionUI();
   }
 
-  // 8) Skin
+  // 8) Skin (igual)
   applyModernSkin();
 }
+
 
 // Marca un campo inválido visualmente
 function markInvalid(id) {
@@ -1906,7 +2107,23 @@ function markInvalid(id) {
   setTimeout(() => el.classList.remove("ring-2", "ring-red-500"), 1500);
 }
 
-function formatDateTimeLocal(d = new Date()) {
+// Fecha/hora local en formato ISO sin milisegundos, ideal para LocalDateTime en el backend
+function formatDateTimeForApi(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mi = pad(d.getMinutes());
+  const ss = pad(d.getSeconds());
+  // "2025-09-24T12:34:56"
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}`;
+}
+
+// Fecha solo día (por si tu DTO fuera LocalDate)
+function todayISODate() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }

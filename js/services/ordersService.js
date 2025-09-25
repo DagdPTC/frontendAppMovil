@@ -19,29 +19,39 @@ const URL_PEDIDOS_DELETE = (id)             => `${BASE_P}/eliminarPedido/${encod
 console.log("[ordersService exact] loaded");
 
 // ===== Helper HTTP =====
-async function fetchJSON(url, { method = "GET", headers = {}, body } = {}) {
-  const res = await fetch(url, { method, credentials: "include", 
-    headers: { "Content-Type": "application/json", Accept: "application/json", ...headers },
-    body,
+// ===== Helper HTTP =====
+// ordersService.js
+export async function fetchJSON(url, options = {}) {
+  const res = await fetch(url, {
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
   });
 
-  const raw = await res.text();
-  let data;
-  try { data = raw ? JSON.parse(raw) : null; } catch { data = raw; }
-
   if (!res.ok) {
-    console.error("[API ERROR]", url, res.status, res.statusText, data);
+    let bodyText = null;
+    let bodyJson = null;
+    try { bodyJson = await res.json(); }
+    catch { try { bodyText = await res.text(); } catch { bodyText = null; } }
+
+    console.error("[API ERROR]", url, res.status, bodyJson || bodyText || "(sin cuerpo)");
+
     const msg =
-      (data && (data.message || data.error || data.status || data.detail)) ||
-      (typeof data === "string" ? data : "") ||
-      res.statusText || "Error";
+      (bodyJson && (bodyJson.message || bodyJson.error || bodyJson.title)) ||
+      `HTTP ${res.status}`;
+
     const err = new Error(msg);
     err.status = res.status;
-    err.data = data;
+    err.details = bodyJson || bodyText;
     throw err;
   }
-  return data;
+
+  if (res.status === 204) return null;
+  return res.json();
 }
+
+
+
 
 function pickArray(data) {
   if (!data) return [];
@@ -105,11 +115,17 @@ function coercePedidoInput(dto) {
 // ===== Pedidos =====
 export async function getPedidos(page = 0, size = 50) {
   const url = URL_PEDIDOS_LIST(page, size);
-  const data = await fetchJSON(url);
-  const arr = pickArray(data);
-  console.log("[Pedidos]", arr.length, "via", url);
-  return arr;
+  try {
+    const data = await fetchJSON(url);
+    const arr = pickArray(data);
+    console.log("[Pedidos]", arr.length, "via", url);
+    return arr;
+  } catch (e) {
+    console.warn("[Pedidos] fallback [] por error:", e?.message || e);
+    return []; // ← Esto evita que se caiga la UI si /apiPedido falla por auth
+  }
 }
+
 
 // PÉGALO TAL CUAL, reemplazando tu método actual
 export async function createPedido(body) {
