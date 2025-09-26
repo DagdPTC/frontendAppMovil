@@ -50,7 +50,6 @@ function reiniciarSistemaSiEsNuevoDia() {
 // ==========================
 // Helper de fechas (usa EXACTAMENTE las fechas de la API/BD)
 // ==========================
-// Formatea "YYYY-MM-DD" → "dd/mm/aaaa" sin crear Date (evita desfases por timezone).
 function fmtFechaYMD(ymd) {
     if (!ymd || typeof ymd !== 'string') return null;
     const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/); // espera "YYYY-MM-DD"
@@ -58,7 +57,6 @@ function fmtFechaYMD(ymd) {
         const [, y, mm, dd] = m;
         return `${dd}/${mm}/${y}`;
     }
-    // Si no viene en YMD puro, último recurso: intenta parsear y formatear local
     const d = new Date(ymd);
     return isNaN(d) ? null : d.toLocaleDateString('es-ES');
 }
@@ -66,27 +64,50 @@ function fmtFechaYMD(ymd) {
 // Obtener estadísticas de mesas desde la API
 async function obtenerEstadisticasMesas() {
     try {
-        const response = await fetch('http://localhost:8080/apiMesa/getDataMesa', {
+        // Obtener datos de las mesas
+        const mesasResponse = await fetch('http://localhost:8080/apiMesa/getDataMesa', {
             method: 'GET',
             headers: obtenerHeaders(),  // Usa los encabezados con el token
             credentials: "include"
         });
-        const data = await response.json();
+        const mesasData = await mesasResponse.json();
 
-        if (response.ok) {
-            if (data && Array.isArray(data.content)) {  // Verifica que 'content' sea un array
-                const mesas = data.content;  // Accede al array de mesas
-                const totalMesas = mesas.length;
-                const mesasDisponibles = mesas.filter(mesa => mesa.status === 'disponible').length;
+        // Obtener datos de los estados de las mesas
+        const estadosResponse = await fetch('http://localhost:8080/apiEstadoMesa/getDataEstadoMesa', {
+            method: 'GET',
+            headers: obtenerHeaders(),  // Usa los encabezados con el token
+            credentials: "include"
+        });
+        const estadosData = await estadosResponse.json();
+
+        if (mesasResponse.ok && estadosResponse.ok) {
+            if (mesasData && Array.isArray(mesasData.content) && estadosData && Array.isArray(estadosData.content)) {
+                // Accede a las mesas y estados
+                const mesas = mesasData.content;
+                const estadosMesas = estadosData.content;
+
+                // Contamos el total de mesas y las disponibles
+                const totalMesas = mesas.length;  // Total de mesas fijo
+                let mesasDisponibles = 0;
+
+                // Verificamos el estado de cada mesa
+                mesas.forEach(mesa => {
+                    const estadoMesa = estadosMesas.find(estado => estado.id === mesa.idEstadoMesa);
+                    if (estadoMesa && estadoMesa.estadoMesa === 'Disponible') {
+                        mesasDisponibles++;  // Si la mesa está disponible, aumentamos el contador
+                    }
+                });
+
+                // Actualizamos el contador de mesas disponibles
                 const contador = document.getElementById('mesas-disponibles');
                 if (contador) {
-                    contador.textContent = `${mesasDisponibles}/${totalMesas}`;
+                    contador.textContent = `${mesasDisponibles}/${totalMesas}`;  // Muestra las mesas disponibles sobre el total
                 }
             } else {
-                console.error('Las mesas no están en el formato esperado');
+                console.error('Las mesas o estados no están en el formato esperado');
             }
         } else {
-            console.error('Error al obtener las estadísticas de mesas:', data);
+            console.error('Error al obtener las estadísticas de mesas:', mesasData, estadosData);
         }
     } catch (error) {
         console.error('Error en la solicitud de estadísticas de mesas:', error);
@@ -309,161 +330,21 @@ const actualizarTodo = () => {
     obtenerEstadisticasPedidos();
 };
 
-// Menú de usuario
-const userMenuBtn = document.getElementById('user-menu-btn');
-const userMenu = document.getElementById('user-menu');
-const overlay = document.getElementById('overlay');
-const logoutBtn = document.getElementById('logout-btn');
-const userMenuImg = document.getElementById('user-menu-img');
-
-// Alternar menú de usuario
-userMenuBtn?.addEventListener('click', () => {
-    userMenu.classList.toggle('active');
-    overlay.classList.toggle('active');
-});
-
-// Cerrar menú al hacer clic en el overlay
-overlay?.addEventListener('click', () => {
-    userMenu.classList.remove('active');
-    overlay.classList.remove('active');
-});
-
-// Función para cerrar sesión
-logoutBtn?.addEventListener('click', () => {
-    // Aquí podrías agregar lógica adicional como limpiar localStorage si es necesario
-    window.location.href = 'LogIn.html';
-});
-
-// Opcional: Permitir cambiar la imagen (simulación)
-userMenuImg?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    // En una implementación real, aquí podrías abrir un selector de archivos
-    alert('Funcionalidad para cambiar imagen: En una implementación real aquí se abriría un selector de archivos');
-});
-
-
-// ==========================
-// AÑADIDOS MÍNIMOS: saludo dinámico (idéntica idea a Pedidos)
-// ==========================
-
-const API_HOST = "http://localhost:8080";
-
-// Usa la sesión del backend
-async function ensureMeInSession(opts = {}) {
-  const KEY = "ord_user";
-  const force = opts.forceNetwork === true;
-
-  if (!force) {
-    try {
-      const cached = JSON.parse(sessionStorage.getItem(KEY) || "null");
-      if (cached && (cached.username || cached.correo)) return cached;
-    } catch {}
-  }
-
-  try {
-    const res = await fetch(`${API_HOST}/api/auth/me`, {
-      method: "GET",
-      credentials: "include",
-      headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" }
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-
-    const me = {
-      correo: data.correo || null,
-      rol: data.rol || null,
-      username: data.username || data.user || data.nombreUsuario || data.nombreusuario || null,
-      usuarioId: Number(data.usuarioId ?? data.id ?? data.usuarioID ?? 0) || null,
-      idEmpleado: Number(data.idEmpleado ?? data.idempleado ?? 0) || null,
-    };
-    sessionStorage.setItem(KEY, JSON.stringify(me));
-    return me;
-  } catch (e) {
-    try { sessionStorage.removeItem(KEY); } catch {}
-    return { correo: null, rol: null, username: null, usuarioId: null, idEmpleado: null, error: e?.message || String(e) };
-  }
-}
-
-function aTitulo(nombre) {
-  if (!nombre || typeof nombre !== 'string') return null;
-  return nombre.trim().split(/\s+/).map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
-}
-
-function decodificarJWT(token) {
-  try {
-    const payload = token.split('.')[1];
-    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const json = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
-    return JSON.parse(json);
-  } catch { return null; }
-}
-
-async function resolverIdentidadUsuario() {
-  // 1) /auth/me primero
-  const me = await ensureMeInSession({ forceNetwork: true });
-
-  let nombre = aTitulo(me?.username) || null;
-  let rol = aTitulo(me?.rol) || null;
-
-  // 2) Respaldos: token/localStorage si hiciera falta
-  if (!nombre) {
-    const lsNombre = localStorage.getItem('usuarioNombre') || localStorage.getItem('NombreUsuario') || localStorage.getItem('userName');
-    const token = obtenerToken();
-    const payload = token ? decodificarJWT(token) : null;
-
-    nombre =
-      aTitulo(lsNombre) ||
-      aTitulo(payload?.NombreUsuario || payload?.nombreUsuario || payload?.username || payload?.name || payload?.sub) ||
-      'Usuario';
-    rol = rol || aTitulo(payload?.rol || payload?.role) || aTitulo(localStorage.getItem('usuarioRol') || localStorage.getItem('Rol') || localStorage.getItem('rolNombre')) || null;
-  }
-
-  return { nombre, rol };
-}
-
-async function pintarUsuarioUI() {
-  try {
-    const { nombre, rol } = await resolverIdentidadUsuario();
-
-    const spanSaludo = document.getElementById('greeting-name');
-    if (spanSaludo) spanSaludo.textContent = nombre;
-
-    const menuName = document.getElementById('user-menu-name');
-    if (menuName) menuName.textContent = nombre;
-
-    const menuRole = document.getElementById('user-menu-role');
-    if (menuRole && rol) menuRole.textContent = rol;
-  } catch (e) {
-    console.warn("No se pudo pintar el usuario:", e?.message || e);
-  }
-}
-
-
 // ==========================
 // INIT
 // ==========================
 document.addEventListener('DOMContentLoaded', async () => {
-    // Saludo dinámico (basado en sesión)
-    await pintarUsuarioUI();
-
     // Ejecutar reinicio automático al cargar
     reiniciarSistemaSiEsNuevoDia();
 
-    // Obtener estadísticas de mesas y pedidos desde la API (BLOQUE ORIGINAL)
-    obtenerEstadisticasMesas();
+    // Obtener estadísticas de mesas y pedidos desde la API
+    obtenerEstadisticasMesas();  // Este es el código que actualiza la estadística de mesas disponibles
     obtenerEstadisticasPedidos();
 
     // Mostrar ofertas en el carrusel (con controles)
     renderOfertas();
 
-    // Resto de la inicialización (BLOQUE ORIGINAL)
+    // Resto de la inicialización
     updateCurrentDate();
     setInterval(actualizarTodo, 5000);
-
-    document.addEventListener('visibilitychange', async () => {
-        if (document.visibilityState === 'visible') {
-            actualizarTodo();
-            await pintarUsuarioUI(); // refresca el saludo por si cambió la sesión
-        }
-    });
 });
