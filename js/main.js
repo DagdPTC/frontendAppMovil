@@ -1,194 +1,191 @@
 // ==========================
-// BLOQUE ORIGINAL (SIN CAMBIOS)
+// main.js (COMPLETO con autenticación y logout)
 // ==========================
 
-// Función para obtener el token de autenticación desde el localStorage
-function obtenerToken() {
-    return localStorage.getItem('token');  // Obtiene el token guardado en el localStorage
-}
+// ====== Config base ======
+const API_BASE = "http://localhost:8080";
 
-// Configuración de los encabezados con el token de autenticación
+// Endpoint correcto según tu AuthController
+const ME_ENDPOINT = `${API_BASE}/api/auth/me`;
+
+// ==========================
+// FUNCIONES DE AUTENTICACIÓN
+// ==========================
+
+// Configuración de headers básicos (sin token, porque va en cookie)
 function obtenerHeaders() {
-    const token = obtenerToken();  // Obtiene el token
-    if (token) {
-        return {
-            'Content-Type': 'application/json',
-            'x-auth-token': token,  // Incluye el token en el encabezado x-auth-token
-        };
-    }
-    return {
-        'Content-Type': 'application/json',
-    };
+  return {
+    'Content-Type': 'application/json',
+  };
 }
 
 // Función para reiniciar el sistema si es un nuevo día
 function reiniciarSistemaSiEsNuevoDia() {
-    const hoy = new Date().toDateString();
-    const ultimaFecha = localStorage.getItem('ultimaFechaSistema');
+  const hoy = new Date().toDateString();
+  const ultimaFecha = localStorage.getItem('ultimaFechaSistema');
 
-    if (ultimaFecha !== hoy) {
-        // Reiniciar mesas a disponible
-        const nuevasMesas = Array.from({ length: 12 }, (_, i) => ({
-            number: i + 1,
-            status: 'disponible'
-        }));
-        localStorage.setItem('estadoMesas', JSON.stringify(nuevasMesas));
+  if (ultimaFecha !== hoy) {
+    // Reiniciar mesas a disponible
+    const nuevasMesas = Array.from({ length: 12 }, (_, i) => ({
+      number: i + 1,
+      status: 'disponible'
+    }));
+    localStorage.setItem('estadoMesas', JSON.stringify(nuevasMesas));
 
-        // Eliminar pedidos guardados
-        localStorage.removeItem('pedidosGuardados');
+    // Eliminar pedidos guardados
+    localStorage.removeItem('pedidosGuardados');
 
-        // Reiniciar estadísticas de pedidos del día
-        localStorage.setItem('pedidosHoy', '0');
+    // Reiniciar estadísticas de pedidos del día
+    localStorage.setItem('pedidosHoy', '0');
 
-        // Actualizar fecha registrada
-        localStorage.setItem('ultimaFechaSistema', hoy);
+    // Actualizar fecha registrada
+    localStorage.setItem('ultimaFechaSistema', hoy);
 
-        console.log('Sistema reiniciado automáticamente por nuevo día.');
-    }
+    console.log('Sistema reiniciado automáticamente por nuevo día.');
+  }
 }
 
 // ==========================
-// Helper de fechas (usa EXACTAMENTE las fechas de la API/BD)
+// Helper de fechas
 // ==========================
 function fmtFechaYMD(ymd) {
-    if (!ymd || typeof ymd !== 'string') return null;
-    const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/); // espera "YYYY-MM-DD"
-    if (m) {
-        const [, y, mm, dd] = m;
-        return `${dd}/${mm}/${y}`;
-    }
-    const d = new Date(ymd);
-    return isNaN(d) ? null : d.toLocaleDateString('es-ES');
+  if (!ymd || typeof ymd !== 'string') return null;
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) {
+    const [, y, mm, dd] = m;
+    return `${dd}/${mm}/${y}`;
+  }
+  const d = new Date(ymd);
+  return isNaN(d) ? null : d.toLocaleDateString('es-ES');
 }
 
-// Obtener estadísticas de mesas desde la API
+// ==========================
+// ESTADÍSTICAS DE MESAS
+// ==========================
 async function obtenerEstadisticasMesas() {
-    try {
-        // Obtener datos de las mesas
-        const mesasResponse = await fetch('http://localhost:8080/apiMesa/getDataMesa', {
-            method: 'GET',
-            headers: obtenerHeaders(),  // Usa los encabezados con el token
-            credentials: "include"
+  try {
+    const mesasResponse = await fetch(`${API_BASE}/apiMesa/getDataMesa`, {
+      method: 'GET',
+      headers: obtenerHeaders(),
+      credentials: "include"
+    });
+    const mesasData = await mesasResponse.json();
+
+    const estadosResponse = await fetch(`${API_BASE}/apiEstadoMesa/getDataEstadoMesa`, {
+      method: 'GET',
+      headers: obtenerHeaders(),
+      credentials: "include"
+    });
+    const estadosData = await estadosResponse.json();
+
+    if (mesasResponse.ok && estadosResponse.ok) {
+      if (mesasData && Array.isArray(mesasData.content) && estadosData && Array.isArray(estadosData.content)) {
+        const mesas = mesasData.content;
+        const estadosMesas = estadosData.content;
+
+        const totalMesas = mesas.length;
+        let mesasDisponibles = 0;
+
+        mesas.forEach(mesa => {
+          const estadoMesa = estadosMesas.find(estado => estado.id === mesa.idEstadoMesa);
+          if (estadoMesa && estadoMesa.estadoMesa === 'Disponible') {
+            mesasDisponibles++;
+          }
         });
-        const mesasData = await mesasResponse.json();
 
-        // Obtener datos de los estados de las mesas
-        const estadosResponse = await fetch('http://localhost:8080/apiEstadoMesa/getDataEstadoMesa', {
-            method: 'GET',
-            headers: obtenerHeaders(),  // Usa los encabezados con el token
-            credentials: "include"
-        });
-        const estadosData = await estadosResponse.json();
-
-        if (mesasResponse.ok && estadosResponse.ok) {
-            if (mesasData && Array.isArray(mesasData.content) && estadosData && Array.isArray(estadosData.content)) {
-                // Accede a las mesas y estados
-                const mesas = mesasData.content;
-                const estadosMesas = estadosData.content;
-
-                // Contamos el total de mesas y las disponibles
-                const totalMesas = mesas.length;  // Total de mesas fijo
-                let mesasDisponibles = 0;
-
-                // Verificamos el estado de cada mesa
-                mesas.forEach(mesa => {
-                    const estadoMesa = estadosMesas.find(estado => estado.id === mesa.idEstadoMesa);
-                    if (estadoMesa && estadoMesa.estadoMesa === 'Disponible') {
-                        mesasDisponibles++;  // Si la mesa está disponible, aumentamos el contador
-                    }
-                });
-
-                // Actualizamos el contador de mesas disponibles
-                const contador = document.getElementById('mesas-disponibles');
-                if (contador) {
-                    contador.textContent = `${mesasDisponibles}/${totalMesas}`;  // Muestra las mesas disponibles sobre el total
-                }
-            } else {
-                console.error('Las mesas o estados no están en el formato esperado');
-            }
-        } else {
-            console.error('Error al obtener las estadísticas de mesas:', mesasData, estadosData);
+        const contador = document.getElementById('mesas-disponibles');
+        if (contador) {
+          contador.textContent = `${mesasDisponibles}/${totalMesas}`;
         }
-    } catch (error) {
-        console.error('Error en la solicitud de estadísticas de mesas:', error);
+      } else {
+        console.error('Las mesas o estados no están en el formato esperado');
+      }
+    } else {
+      console.error('Error al obtener las estadísticas de mesas:', mesasData, estadosData);
     }
+  } catch (error) {
+    console.error('Error en la solicitud de estadísticas de mesas:', error);
+  }
 }
 
-// Obtener estadísticas de pedidos desde la API
+// ==========================
+// ESTADÍSTICAS DE PEDIDOS
+// ==========================
 async function obtenerEstadisticasPedidos() {
-    try {
-        const response = await fetch('http://localhost:8080/apiPedido/getDataPedido', {
-            method: 'GET',
-            headers: obtenerHeaders(),  // Usa los encabezados con el token
-            credentials: "include"
-        });
-        const data = await response.json();
+  try {
+    const response = await fetch(`${API_BASE}/apiPedido/getDataPedido`, {
+      method: 'GET',
+      headers: obtenerHeaders(),
+      credentials: "include"
+    });
+    const data = await response.json();
 
-        if (response.ok) {
-            if (data && Array.isArray(data.content)) {  // Verifica que 'content' sea un array
-                const pedidos = data.content;  // Accede al array de pedidos
-                const totalPedidos = pedidos.length;
-                const contador = document.getElementById('pedidos-hoy');
-                if (contador) {
-                    contador.textContent = totalPedidos;
-                }
-            } else {
-                console.error('Los pedidos no están en el formato esperado');
-            }
-        } else {
-            console.error('Error al obtener las estadísticas de pedidos:', data);
+    if (response.ok) {
+      if (data && Array.isArray(data.content)) {
+        const pedidos = data.content;
+        const totalPedidos = pedidos.length;
+        const contador = document.getElementById('pedidos-hoy');
+        if (contador) {
+          contador.textContent = totalPedidos;
         }
-    } catch (error) {
-        console.error('Error en la solicitud de estadísticas de pedidos:', error);
+      } else {
+        console.error('Los pedidos no están en el formato esperado');
+      }
+    } else {
+      console.error('Error al obtener las estadísticas de pedidos:', data);
     }
+  } catch (error) {
+    console.error('Error en la solicitud de estadísticas de pedidos:', error);
+  }
 }
 
-// Obtener ofertas desde la API para el carrusel (MUESTRA fechas exactas de BD)
+// ==========================
+// OFERTAS DEL CARRUSEL
+// ==========================
 async function obtenerOfertas() {
-    try {
-        const response = await fetch('http://localhost:8080/apiOfertas/getDataOfertas', {
-            method: 'GET',
-            headers: obtenerHeaders(),  // Usa los encabezados con el token
-            credentials: "include"
+  try {
+    const response = await fetch(`${API_BASE}/apiOfertas/getDataOfertas`, {
+      method: 'GET',
+      headers: obtenerHeaders(),
+      credentials: "include"
+    });
+    const data = await response.json();
+
+    if (response.ok) {
+      if (data && Array.isArray(data.data)) {
+        return data.data.map(oferta => {
+          const ini = fmtFechaYMD(oferta.fechaInicio);
+          const fin = fmtFechaYMD(oferta.fechaFin);
+
+          let textoFecha = '';
+          if (ini && fin) {
+            textoFecha = ` · Del ${ini} al ${fin}`;
+          } else if (fin) {
+            textoFecha = ` · Hasta ${fin}`;
+          }
+
+          return {
+            title: oferta.descripcion,
+            content: `${oferta.porcentajeDescuento}% de descuento${textoFecha}`,
+            bgColor: oferta.bgColor || "bg-gradient-to-r from-blue-400 to-blue-600",
+            icon: oferta.icon || "fas fa-tag",
+          };
         });
-        const data = await response.json();
-
-        if (response.ok) {
-            if (data && Array.isArray(data.data)) {  // Verifica que 'data' sea un array
-                return data.data.map(oferta => {
-                    const ini = fmtFechaYMD(oferta.fechaInicio); // ← viene de tu BD/API tal cual
-                    const fin = fmtFechaYMD(oferta.fechaFin);    // ← viene de tu BD/API tal cual
-
-                    let textoFecha = '';
-                    if (ini && fin) {
-                        textoFecha = ` · Del ${ini} al ${fin}`;
-                    } else if (fin) {
-                        textoFecha = ` · Hasta ${fin}`;
-                    }
-                    // Si no hay fechas válidas, no añadimos nada genérico
-
-                    return {
-                        title: oferta.descripcion,  // Asegúrate de que 'descripcion' se mapee correctamente
-                        content: `${oferta.porcentajeDescuento}% de descuento${textoFecha}`,
-                        bgColor: oferta.bgColor || "bg-gradient-to-r from-blue-400 to-blue-600",
-                        icon: oferta.icon || "fas fa-tag",
-                    };
-                });
-            } else {
-                console.error('Las ofertas no están en el formato esperado');
-                return [];
-            }
-        } else {
-            console.error('Error al obtener las ofertas:', data);
-            return [];  // Retorna un arreglo vacío si hay un error en la solicitud
-        }
-    } catch (error) {
-        console.error('Error en la solicitud de ofertas:', error);
-        return [];  // Retorna un arreglo vacío si ocurre un error
+      } else {
+        console.error('Las ofertas no están en el formato esperado');
+        return [];
+      }
+    } else {
+      console.error('Error al obtener las ofertas:', data);
+      return [];
     }
+  } catch (error) {
+    console.error('Error en la solicitud de ofertas:', error);
+    return [];
+  }
 }
 
-// Función para renderizar las ofertas en el carrusel (con botones e indicadores clicables + swipe)
+// Función para renderizar las ofertas en el carrusel
 async function renderOfertas() {
   const ofertas = await obtenerOfertas();
 
@@ -238,7 +235,6 @@ async function renderOfertas() {
       cardContainer.appendChild(cardElement);
     }
 
-    // Actualiza indicadores existentes en el HTML (indicator-1..5)
     const allIndicators = Array.from(document.querySelectorAll('[id^="indicator-"]'));
     allIndicators.forEach((indicator, i) => {
       indicator.className = i === index
@@ -256,9 +252,7 @@ async function renderOfertas() {
   const nextCard = () => goTo(currentCardIndex + 1);
   const prevCard = () => goTo(currentCardIndex - 1);
 
-  // --- Botones dinámicos (más pequeños y más transparentes) ---
-  const outer = cardContainer.parentElement; // el contenedor relativo del carrusel
-  // Limpia botones previos si re-renderizas
+  const outer = cardContainer.parentElement;
   outer.querySelectorAll('.ofertas-btn').forEach(el => el.remove());
 
   const mkBtn = (side) => {
@@ -278,30 +272,25 @@ async function renderOfertas() {
     return btn;
   };
 
-  // Solo crea botones si hay más de 1 oferta
   if (ofertas.length > 1) {
     outer.appendChild(mkBtn('left'));
     outer.appendChild(mkBtn('right'));
   }
 
-  // --- Click en indicadores: salta a la tarjeta específica ---
   const indicators = Array.from(document.querySelectorAll('[id^="indicator-"]'));
   indicators.forEach((el, idx) => {
     if (idx < ofertas.length) {
       el.style.cursor = 'pointer';
       el.onclick = () => { goTo(idx); resetAutoplay(); };
     } else {
-      // Si hay más indicadores que ofertas, los deshabilitamos visualmente
       el.style.cursor = 'default';
       el.onclick = null;
     }
   });
 
-  // Render inicial y autoplay
   renderCard(0);
   if (ofertas.length > 1) startAutoplay();
 
-  // Swipe (opcional en móviles)
   let startX = null;
   outer.addEventListener('touchstart', (e) => {
     if (e.touches && e.touches.length === 1) startX = e.touches[0].clientX;
@@ -317,34 +306,214 @@ async function renderOfertas() {
   }, { passive: true });
 }
 
-// Función para actualizar la fecha actual
+// ==========================
+// 👤 SALUDO DINÁMICO
+// ==========================
+
+// Obtiene el usuario actual desde /api/auth/me
+async function fetchUsuarioActual() {
+  try {
+    const res = await fetch(ME_ENDPOINT, { 
+      method: "GET", 
+      headers: obtenerHeaders(), 
+      credentials: "include"
+    });
+    
+    if (!res.ok) {
+      console.warn(`/me respondió con ${res.status}`);
+      return null;
+    }
+    
+    const data = await res.json();
+    return data || null;
+  } catch (error) {
+    console.error('Error al obtener usuario:', error);
+    return null;
+  }
+}
+
+// Extrae el nombre a mostrar del objeto /me
+function obtenerNombreMostrar(me) {
+  if (!me) return null;
+  
+  // Tu backend devuelve "username" en /me
+  if (me.username) return String(me.username).trim();
+  
+  // Fallback: usar el correo antes del @
+  if (me.correo || me.email) {
+    const correo = String(me.correo || me.email);
+    const user = correo.split("@")[0] || correo;
+    return user;
+  }
+  
+  return null;
+}
+
+function obtenerRolMostrar(me) {
+  if (!me) return null;
+  return me.rol || null;
+}
+
+// Pinta el saludo y el menú de usuario en la UI
+function pintarUsuarioEnUI(me) {
+  const nombre = obtenerNombreMostrar(me) || "Usuario";
+  const rol = obtenerRolMostrar(me);
+
+  const spanSaludo = document.getElementById("greeting-name");
+  if (spanSaludo) spanSaludo.textContent = nombre;
+
+  const menuName = document.getElementById("user-menu-name");
+  if (menuName) menuName.textContent = nombre;
+
+  const menuRole = document.getElementById("user-menu-role");
+  if (menuRole && rol) menuRole.textContent = rol;
+
+  // Si en el futuro agregas foto de perfil al backend
+  const img = document.getElementById("user-menu-img");
+  if (img && me.fotoUrl) img.src = me.fotoUrl;
+
+  // Guarda en cache para futuras cargas
+  try { 
+    localStorage.setItem("orderly_me_cache", JSON.stringify({ nombre, rol })); 
+  } catch {}
+}
+
+// Si falla /me, usa cache si existe
+function pintarDesdeCacheSiDisponible() {
+  try {
+    const raw = localStorage.getItem("orderly_me_cache");
+    if (!raw) return;
+    
+    const { nombre, rol } = JSON.parse(raw);
+    
+    if (nombre) {
+      const spanSaludo = document.getElementById("greeting-name");
+      if (spanSaludo) spanSaludo.textContent = nombre;
+      
+      const menuName = document.getElementById("user-menu-name");
+      if (menuName) menuName.textContent = nombre;
+    }
+    
+    if (rol) {
+      const menuRole = document.getElementById("user-menu-role");
+      if (menuRole) menuRole.textContent = rol;
+    }
+  } catch {}
+}
+
+// ==========================
+// 🚪 CERRAR SESIÓN
+// ==========================
+
+// Función para cerrar sesión
+async function cerrarSesion() {
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/logout`, {
+      method: 'POST',
+      headers: obtenerHeaders(),
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      console.log('Sesión cerrada correctamente');
+    } else {
+      console.error('Error al cerrar sesión en el servidor');
+    }
+  } catch (error) {
+    console.error('Error en la solicitud de logout:', error);
+  } finally {
+    // Siempre limpiar cache y redirigir, incluso si falla la petición
+    localStorage.removeItem('orderly_me_cache');
+    localStorage.removeItem('estadoMesas');
+    localStorage.removeItem('pedidosGuardados');
+    window.location.href = 'login.html';
+  }
+}
+
+// Función para toggle del menú de usuario
+function inicializarMenuUsuario() {
+  const userMenuBtn = document.getElementById('user-menu-btn');
+  const userMenu = document.getElementById('user-menu');
+  const overlay = document.getElementById('overlay');
+  const logoutBtn = document.getElementById('logout-btn');
+
+  // Abrir/cerrar menú al hacer clic en el botón
+  if (userMenuBtn) {
+    userMenuBtn.addEventListener('click', () => {
+      if (userMenu) userMenu.classList.toggle('active');
+      if (overlay) overlay.classList.toggle('active');
+    });
+  }
+
+  // Cerrar menú al hacer clic en el overlay
+  if (overlay) {
+    overlay.addEventListener('click', () => {
+      if (userMenu) userMenu.classList.remove('active');
+      overlay.classList.remove('active');
+    });
+  }
+
+  // Cerrar sesión
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      cerrarSesion();
+    });
+  }
+}
+
+// ==========================
+// Fecha y actualización periódica
+// ==========================
 const updateCurrentDate = () => {
-    const now = new Date();
-    const options = { weekday: 'short', day: 'numeric', month: 'short' };
-    document.getElementById('current-date').textContent = now.toLocaleDateString('es-ES', options);
+  const now = new Date();
+  const options = { weekday: 'short', day: 'numeric', month: 'short' };
+  const el = document.getElementById('current-date');
+  if (el) el.textContent = now.toLocaleDateString('es-ES', options);
 };
 
-// Función para actualizar todas las estadísticas
 const actualizarTodo = () => {
-    obtenerEstadisticasMesas();
-    obtenerEstadisticasPedidos();
+  obtenerEstadisticasMesas();
+  obtenerEstadisticasPedidos();
 };
 
 // ==========================
-// INIT
+// 🚀 INICIALIZACIÓN
 // ==========================
 document.addEventListener('DOMContentLoaded', async () => {
-    // Ejecutar reinicio automático al cargar
-    reiniciarSistemaSiEsNuevoDia();
+  // Ejecutar reinicio automático al cargar
+  reiniciarSistemaSiEsNuevoDia();
 
-    // Obtener estadísticas de mesas y pedidos desde la API
-    obtenerEstadisticasMesas();  // Este es el código que actualiza la estadística de mesas disponibles
-    obtenerEstadisticasPedidos();
+  // Inicializar menú de usuario y botón de logout
+  inicializarMenuUsuario();
 
-    // Mostrar ofertas en el carrusel (con controles)
-    renderOfertas();
+  // Saludo dinámico
+  pintarDesdeCacheSiDisponible();
+  
+  try {
+    const me = await fetchUsuarioActual();
+    if (me) {
+      pintarUsuarioEnUI(me);
+      console.log('✅ Usuario autenticado:', me.username, '- Rol:', me.rol);
+    } else {
+      console.warn('⚠️ No se pudo obtener el usuario. Redirigiendo al login...');
+      window.location.href = 'login.html';
+      return;
+    }
+  } catch (e) {
+    console.warn("❌ Error al obtener /me:", e);
+    window.location.href = 'login.html';
+    return;
+  }
 
-    // Resto de la inicialización
-    updateCurrentDate();
-    setInterval(actualizarTodo, 5000);
+  // Obtener estadísticas
+  obtenerEstadisticasMesas();
+  obtenerEstadisticasPedidos();
+
+  // Ofertas en el carrusel
+  renderOfertas();
+
+  // Resto de la inicialización
+  updateCurrentDate();
+  setInterval(actualizarTodo, 5000);
 });
