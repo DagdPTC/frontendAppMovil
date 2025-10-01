@@ -1,15 +1,37 @@
-// js/controllers/mesasController.js
-import { getMesas, patchEstadoMesa } from "../services/mesaService.js";
+// js/controllers/mesaController.js
+// Reemplaza COMPLETO este archivo
+
+import { getMesas, fetchPedidosAll /*, patchEstadoMesa*/ } from "../services/mesaService.js"; // usamos nuestra llamada directa
 
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
 const API_HOST = "http://localhost:8080";
 const MAX_SIZE = 50;
+const AUTO_REFRESH_MS = 3000;
 
-/* ===========================================================
-   Estados de mesa (traer TODAS las páginas)  ← usa 'estadoMesa'
-   =========================================================== */
+/* =============== Helpers =============== */
+const norm = (s) => String(s ?? "")
+  .trim()
+  .toLowerCase()
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "");
+
+function pickArrayPayload(data) {
+  if (Array.isArray(data?.content)) return data.content;
+  if (Array.isArray(data?.data))    return data.data;
+  if (Array.isArray(data))          return data;
+  if (Array.isArray(data?.data?.content)) return data.data.content;
+  return [];
+}
+async function fetchArray(url) {
+  const res = await fetch(url, { credentials: "include", headers: { Accept: "application/json" }, cache: "no-store" });
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => ({}));
+  return pickArrayPayload(data);
+}
+
+/* =============== Estados mesa (catálogo) =============== */
 async function fetchEstadosMesa() {
   const base = `${API_HOST}/apiEstadoMesa/getDataEstadoMesa`;
   let page = 0;
@@ -18,53 +40,240 @@ async function fetchEstadosMesa() {
 
   while (true) {
     const url = `${base}?page=${page}&size=${size}`;
-    const res = await fetch(url, { headers: { Accept: "application/json" }, credentials: "include" });
+    const res = await fetch(url, { headers: { Accept: "application/json" }, credentials: "include", cache: "no-store" });
     if (!res.ok) break;
 
     const data = await res.json().catch(() => ({}));
-    const content = Array.isArray(data?.content) ? data.content : (Array.isArray(data) ? data : []);
+    const content = pickArrayPayload(data);
 
     for (const e of content) {
-      const id = Number(e.id ?? e.ID ?? e.idEstadoMesa ?? e.IdEstadoMesa ?? e.IDESTADOMESA);
-      const nombre = String(
-        e.estadoMesa     // ← tu backend
-        ?? e.nomEstado
-        ?? e.nomEstadoMesa
-        ?? e.nombre
-        ?? e.nombreEstado
-        ?? e.NOMBREESTADO
-        ?? ""
-      ).trim();
+      // DTO: { Id, EstadoMesa, ColorEstadoMesa }
+      const id = Number(e.Id ?? e.id);
+      const nombre = String(e.EstadoMesa ?? e.estadoMesa ?? "").trim();
       if (Number.isFinite(id) && nombre) out.push({ id, nombre });
     }
 
     if (data && typeof data.last === "boolean") {
       if (data.last) break;
       page += 1;
-    } else {
-      break;
+    } else break;
+  }
+
+  const uniq = [...new Map(out.map(x => [x.id, x])).values()];
+  return uniq.length ? uniq : [{ id: 1, nombre: "Disponible" }, { id: 2, nombre: "Ocupada" }];
+}
+
+/* =============== Patch directo a la API (ruta real del backend) =============== */
+// MesaController.java → @PatchMapping("/estado/{id}/{estadoId}")
+async function updateMesaEstadoApi(idMesa, idEstado) {
+  const url = `${API_HOST}/apiMesa/estado/${encodeURIComponent(idMesa)}/${encodeURIComponent(idEstado)}`;
+  const res = await fetch(url, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { Accept: "application/json" }, // sin body
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(()=> "");
+    throw new Error(txt || `PATCH ${url} → ${res.status}`);
+  }
+  // puede devolver el DTO. No lo necesitamos, pero lo parseamos por si acaso
+  let data = null;
+  try { data = await res.json(); } catch {}
+  return data;
+}
+
+/* =============== Estados visuales =============== */
+const BADGE = {
+  disponible: "bg-emerald-100 text-emerald-800",
+  ocupada:    "bg-red-100 text-red-800",
+  reservada:  "bg-amber-100 text-amber-800",
+  limpieza:   "bg-sky-100 text-sky-800",
+  fuera:      "bg-gray-200 text-gray-800",
+  desconocido:"bg-gray-100 text-gray-700",
+};
+function badgeClass(estado) {
+  const key = norm(estado);
+  if (key.includes("dispon")) return BADGE.disponible;
+  if (key.includes("ocup"))   return BADGE.ocupada;
+  if (key.includes("reserv")) return BADGE.reservada;
+  if (key.includes("limp"))   return BADGE.limpieza;
+  if (key.includes("fuera"))  return BADGE.fuera;
+  return BADGE.desconocido;
+}
+
+/* =============== Lógica de negocio (según pedido) =============== */
+/**
+ * Pedido activo → mesa OCUPADA (EstadoMesaId 2)
+ *   - IdEstadoPedido: 1 (Pendiente), 2 (En preparación), 3 (Entregado)
+ * Pedido final → mesa DISPONIBLE (EstadoMesaId 1)
+ *   - IdEstadoPedido: 5 (Cancelado), 6 (Finalizado)
+ *   - (Pagado 4 NO lo pediste, así que no lo toco)
+ * Estados "Limpieza" y "Fuera de uso" se manipulan manualmente (NO se tocan aquí).
+ */
+const PEDIDO_ACTIVO_IDS = new Set([1, 2, 3]);
+const PEDIDO_FINAL_IDS  = new Set([5, 6]);
+const PEDIDO_ACTIVO_NOMS = new Set(["pendiente", "en preparacion", "en preparación", "entregado"]);
+const PEDIDO_FINAL_NOMS  = new Set(["cancelado", "finalizado"]);
+
+function extractMesaIdFromPedido(p) {
+  // DTO: { IdMesa, IdEstadoPedido, ... }
+  const id = Number(p.IdMesa ?? p.idMesa ?? p.mesaId);
+  return Number.isFinite(id) ? id : null;
+}
+function extractEstadoPedidoId(p) {
+  const id = Number(p.IdEstadoPedido ?? p.idEstadoPedido ?? p.estadoPedidoId);
+  return Number.isFinite(id) ? id : null;
+}
+function extractEstadoPedidoNombre(p) {
+  // por si algún serializador adjunta nombre; normalmente el DTO trae solo IDs
+  const n = p.EstadoPedido ?? p.estadoPedido ?? p.NombreEstado ?? p.nombreEstado ?? p.estado;
+  return n ? String(n) : "";
+}
+
+/* Lee pedidos y decide si hay uno ACTIVO por mesa */
+async function getMesasConPedidoActivoSet() {
+  const pedidos = await fetchArray(`${API_HOST}/apiPedido/getDataPedido?page=0&size=500`);
+  const set = new Set();
+  for (const p of pedidos) {
+    const idMesa = extractMesaIdFromPedido(p);
+    if (!Number.isFinite(idMesa)) continue;
+
+    const id = extractEstadoPedidoId(p);
+    const nom = norm(extractEstadoPedidoNombre(p));
+    let activo = false;
+
+    if (id != null) activo = PEDIDO_ACTIVO_IDS.has(id) || (PEDIDO_FINAL_IDS.has(id) ? false : activo);
+    if (!activo && nom) activo = PEDIDO_ACTIVO_NOMS.has(nom);
+
+    if (activo) set.add(String(idMesa));
+  }
+  return set;
+}
+
+/**
+ * Sincroniza en BD:
+ *  - Mesa con pedido activo → Ocupada
+ *  - Mesa sin pedido activo → Disponible
+ *  - NO tocar si la mesa está en Limpieza o Fuera de uso (manual)
+ */
+async function syncMesasSegunPedidos(mesas, estados) {
+  // ===== utilidades robustas (planos/anidados) =====
+  const N = (s) => String(s ?? "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  const getMesaId = (p) => {
+    let id =
+      p.idMesa ?? p.IdMesa ?? p.mesaId ?? p.MesaId ??
+      p?.mesa?.idMesa ?? p?.mesa?.IdMesa ?? p?.mesa?.id ??
+      p?.Mesa?.Id ?? p?.Mesa?.id;
+    id = Number(id);
+    return Number.isFinite(id) ? id : null;
+  };
+
+  const getEstadoPedidoId = (p) => {
+    let id =
+      p.idEstadoPedido ?? p.IdEstadoPedido ?? p.estadoPedidoId ?? p.EstadoPedidoId ??
+      p?.estadoPedido?.idEstadoPedido ?? p?.estadoPedido?.IdEstadoPedido ??
+      p?.EstadoPedido?.idEstadoPedido ?? p?.EstadoPedido?.IdEstadoPedido ??
+      p?.estadoPedido?.id ?? p?.estadoPedido?.Id ?? p?.EstadoPedido?.Id ?? p?.EstadoPedido?.id;
+    id = Number(id);
+    return Number.isFinite(id) ? id : null;
+  };
+
+  const getEstadoPedidoNombre = (p) => {
+    const s =
+      p.nombreEstado ?? p.NombreEstado ?? p.estado ??
+      p?.estadoPedido?.nombreEstado ?? p?.estadoPedido?.NombreEstado ??
+      p?.estadoPedido?.nombre ?? p?.estadoPedido?.Nombre ??
+      p?.EstadoPedido?.NombreEstado ?? p?.EstadoPedido?.nombreEstado ??
+      p?.EstadoPedido?.Nombre ?? p?.EstadoPedido?.nombre;
+    return s ? String(s) : "";
+  };
+
+  const getPedidoTimeKey = (p) => {
+    const d1 = p.horaInicio ?? p.HoraInicio ?? p.fechaPedido ?? p.FechaPedido ?? p.fechaCreacion ?? p.createdAt;
+    const t1 = d1 ? Date.parse(d1) : NaN;
+    if (!Number.isNaN(t1)) return t1;
+    const idPed = Number(p.idPedido ?? p.IdPedido);
+    if (Number.isFinite(idPed)) return idPed;
+    return 0;
+  };
+
+  // ===== IDs de estados de mesa (detectados por nombre) =====
+  const idDisponible = (estados.find(e => N(e.nombre).includes("dispon"))?.id) ?? 1;
+  const idOcupada    = (estados.find(e => N(e.nombre).includes("ocup"))  ?.id) ?? 2;
+  const estadosById  = new Map(estados.map(e => [e.id, e]));
+
+  // ===== reglas de pedido que definiste =====
+  const PEDIDO_ACTIVO_IDS  = new Set([1, 2, 3]); // pendiente / preparación / entregado
+  const PEDIDO_FINAL_IDS   = new Set([5, 6]);    // cancelado / finalizado
+  const PEDIDO_ACTIVO_NOMS = new Set(["pendiente","en preparacion","en preparación","preparacion","preparación","entregado"]);
+  const PEDIDO_FINAL_NOMS  = new Set(["cancelado","finalizado"]);
+
+  // ===== 1) Traer todos los pedidos (paginado) y quedarnos con el ÚLTIMO por mesa =====
+  const pedidos = await fetchPedidosAll();
+  const ultimoPorMesa = new Map(); // mesaId -> pedido más reciente
+
+  for (const p of pedidos) {
+    const mesaId = getMesaId(p);
+    if (!Number.isFinite(mesaId)) continue;
+    const key = getPedidoTimeKey(p);
+    const prev = ultimoPorMesa.get(mesaId);
+    if (!prev || key > prev.__key) {
+      p.__key = key;
+      ultimoPorMesa.set(mesaId, p);
     }
   }
 
-  // quitar duplicados por id
-  const uniq = [...new Map(out.map(x => [x.id, x])).values()];
+  // ===== 2) Decidir target por mesa (sin tocar Limpieza / Fuera de uso) =====
+  const updates = [];
 
-  // Fallback mínimo
-  return uniq.length ? uniq : [{ id: 1, nombre: "Disponible" }];
+  for (const m of mesas) {
+    const mesaId = Number(m.Id ?? m.id ?? m.idMesa ?? m.IdMesa);
+    if (!Number.isFinite(mesaId)) continue;
+
+    const idEstadoBD = Number(m.IdEstadoMesa ?? m.idEstadoMesa);
+    const nombreBD   = estadosById.get(idEstadoBD)?.nombre || "";
+    const sbd = N(nombreBD);
+    if (sbd.includes("limpieza") || sbd.includes("fuera de uso")) continue; // manuales
+
+    const ped = ultimoPorMesa.get(mesaId);
+    let target = idDisponible; // por defecto, sin pedido → disponible
+
+    if (ped) {
+      const idEp  = getEstadoPedidoId(ped);
+      const nomEp = N(getEstadoPedidoNombre(ped));
+      let activo = false;
+
+      if (idEp != null) {
+        if (PEDIDO_ACTIVO_IDS.has(idEp)) activo = true;
+        else if (PEDIDO_FINAL_IDS.has(idEp)) activo = false;
+      }
+      if (!activo && nomEp) {
+        if (PEDIDO_ACTIVO_NOMS.has(nomEp)) activo = true;
+        else if (PEDIDO_FINAL_NOMS.has(nomEp)) activo = false;
+      }
+      target = activo ? idOcupada : idDisponible;
+    }
+
+    if (Number.isFinite(idEstadoBD) && idEstadoBD !== target) {
+      updates.push({ mesaId, to: target });
+    }
+  }
+
+  // ===== 3) PATCH real a la API para escribir en BD =====
+  for (const u of updates) {
+    try {
+      await updateMesaEstadoApi(u.mesaId, u.to);
+    } catch (e) {
+      console.error("[syncMesasSegunPedidos] PATCH falló", u, e?.message || e);
+    }
+  }
+
+  return updates.length > 0;
 }
 
-/* ===========================================================
-   (Opcional) mapeo simple mesa → VM con nombre de estado
-   =========================================================== */
-function buildMesaVM(mesa, estadosCatalogo) {
-  const id   = Number(mesa.id ?? mesa.ID ?? mesa.idMesa);
-  const num  = String(mesa.nomMesa ?? mesa.nombre ?? `Mesa ${id}`);
-  const idEstado = Number(mesa.idEstadoMesa ?? mesa.IdEstadoMesa);
-  const estadoNombre = (estadosCatalogo.find(e => e.id === idEstado)?.nombre || "").trim();
-  return { id, nomMesa: num, idEstado, nombreEstado: estadoNombre };
-}
 
-/* ===== Alertas ===== */
+/* =============== Alertas =============== */
 function ensureAlertHost() {
   let host = document.getElementById("alerts-host");
   if (!host) {
@@ -96,11 +305,11 @@ function showAlert(type = "info", text = "", { timeout = 3500 } = {}) {
   if (timeout) setTimeout(close, timeout);
 }
 
-/* ===== Fancy select (sin buscador) ===== */
+/* =============== Fancy select =============== */
 function upgradeSelect(nativeSelect, opts = {}) {
   if (!nativeSelect || nativeSelect._fancy) return;
   const multiple    = nativeSelect.hasAttribute("multiple") || !!opts.multiple;
-  const placeholder = opts.placeholder || "Seleccione…";
+  const placeholder = opts.placeholder || "Estado";
 
   const wrapper = document.createElement("div");
   wrapper.className = "fancy-select relative w-full";
@@ -157,7 +366,7 @@ function upgradeSelect(nativeSelect, opts = {}) {
   function renderList() {
     list.innerHTML = "";
     readOptions().forEach(opt => {
-      if (opt.disabled) return; // no mostrar placeholder en lista
+      if (opt.disabled) return;
       const row = document.createElement("button");
       row.type = "button";
       row.className = "w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 flex items-center gap-2";
@@ -221,90 +430,12 @@ function upgradeSelect(nativeSelect, opts = {}) {
   nativeSelect._fancy = { wrapper, control, open, close, sync: syncControl, isFancy: true };
 }
 
-/* ===== Utilidades estado ===== */
-const BADGE = {
-  disponible: "bg-emerald-100 text-emerald-800",
-  ocupada:    "bg-red-100 text-red-800",
-  reservada:  "bg-amber-100 text-amber-800",
-  limpieza:   "bg-sky-100 text-sky-800",
-  desconocido:"bg-gray-100 text-gray-700",
-};
-function badgeClass(estado) {
-  const key = String(estado || "").toLowerCase();
-  return BADGE[key] || BADGE.desconocido;
-}
-function humanEstado(est) {
-  const s = (est || "").toLowerCase();
-  if (s.includes("dispon")) return "disponible";
-  if (s.includes("ocup"))   return "ocupada";
-  if (s.includes("reserv")) return "reservada";
-  if (s.includes("limp"))   return "limpieza";
-  return est || "";
-}
-function isToday(isoDateStr) {
-  if (!isoDateStr) return false;
-  const d = new Date(isoDateStr);
-  if (isNaN(d)) {
-    const m = String(isoDateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (!m) return false;
-    const t = new Date();
-    return Number(m[1])===t.getFullYear() && Number(m[2])===t.getMonth()+1 && Number(m[3])===t.getDate();
-    }
-  const t = new Date();
-  return d.getFullYear()===t.getFullYear() && d.getMonth()===t.getMonth() && d.getDate()===t.getDate();
-}
-function nowBetween(h1, h2) {
-  const pad = n => String(n).padStart(2,"0");
-  const t = new Date();
-  const now = `${pad(t.getHours())}:${pad(t.getMinutes())}`;
-  const a = (h1||"").slice(0,5);
-  const b = (h2||"").slice(0,5);
-  return (!a || now >= a) && (!b || now <= b);
-}
-
-/* ===== Cargas auxiliares ligeras ===== */
-async function getPedidosLight(page=0,size=MAX_SIZE) {
-  const url = `${API_HOST}/apiPedido/getDataPedido?page=${page}&size=${Math.min(size, MAX_SIZE)}`;
-  const res = await fetch(url, { headers: { Accept: "application/json" }, credentials: "include" });
-  const text = await res.text().catch(()=> "");
-  if (!res.ok) return [];
-  let data; try { data = text ? JSON.parse(text) : null; } catch { data = null; }
-  const arr = Array.isArray(data?.content) ? data.content : [];
-  return arr
-    .map(p => ({
-      idMesa: Number(p.idMesa ?? p.IdMesa),
-      idEstadoPedido: Number(p.idEstadoPedido ?? p.IdEstadoPedido), // 1..4
-    }))
-    .filter(x => Number.isFinite(x.idMesa) && x.idMesa > 0);
-}
-
-async function getReservasLight(page=0,size=MAX_SIZE) {
-  try {
-    const url = `${API_HOST}/apiReserva/getDataReserva?page=${page}&size=${Math.min(size, MAX_SIZE)}`;
-    const res = await fetch(url, { headers: { Accept: "application/json" }, credentials: "include" });
-    const text = await res.text().catch(()=> "");
-    if (!res.ok) return [];
-    let data; try { data = text ? JSON.parse(text) : null; } catch { data = null; }
-    const arr = Array.isArray(data?.content) ? data.content : [];
-    return arr.map(r => ({
-      idMesa: Number(r.idMesa ?? r.IdMesa),
-      idEstadoReserva: Number(r.idEstadoReserva ?? r.IdEstadoReserva),
-      fechaReserva: String(r.fechaReserva ?? r.FechaReserva ?? ""),
-      horaInicio:   String(r.horaInicio   ?? r.HoraInicio   ?? ""),
-      horaFin:      String(r.horaFin      ?? r.HoraFin      ?? ""),
-    }));
-  } catch { return []; }
-}
-
-/* ===== Tarjeta (select sin botón, bloqueada si Ocupada/Reservada) ===== */
+/* =============== Card mesa =============== */
 function renderMesaCard(vm, estadosCatalogo, onAfterChange) {
-  const estadoActual = (vm.nombreEstado || "").toLowerCase();
-  const isLocked = /ocupad|reservad/.test(estadoActual);
+  const nombreLower = norm(vm.nombreEstado);
+  const isLocked = nombreLower.includes("ocup") || nombreLower.includes("limpieza") || nombreLower.includes("fuera de uso");
 
-  // opciones = todos los estados menos Ocupada/Reservada
-  let opciones = (Array.isArray(estadosCatalogo) ? estadosCatalogo : []).filter(
-    e => !/ocupad|reservad/i.test(e.nombre || "")
-  );
+  let opciones = Array.isArray(estadosCatalogo) ? estadosCatalogo.slice() : [];
   if (!opciones.length) opciones = [{ id: 1, nombre: "Disponible" }];
 
   const card = document.createElement("div");
@@ -313,24 +444,15 @@ function renderMesaCard(vm, estadosCatalogo, onAfterChange) {
     isLocked ? "opacity-60 pointer-events-none" : ""
   ].join(" ");
 
-  const estadoBadge = (s) => {
-    const k = (s || "").toLowerCase();
-    if (k.includes("dispon")) return "bg-emerald-100 text-emerald-800";
-    if (k.includes("ocup"))   return "bg-red-100 text-red-800";
-    if (k.includes("reserv")) return "bg-amber-100 text-amber-800";
-    if (k.includes("limp"))   return "bg-sky-100 text-sky-800";
-    return "bg-gray-100 text-gray-700";
-  };
-
   card.innerHTML = `
     <div class="flex items-center justify-between">
       <div class="text-lg font-semibold">${vm.nomMesa}</div>
-      <span class="px-2 py-1 text-xs rounded ${estadoBadge(vm.nombreEstado)} capitalize">
+      <span class="px-2 py-1 text-xs rounded ${badgeClass(vm.nombreEstado)} capitalize">
         ${vm.nombreEstado || "—"}
       </span>
     </div>
     <div class="mt-1 text-sm ${isLocked ? "text-red-600" : "text-gray-600"}">
-      ${isLocked ? "No se puede cambiar: mesa ocupada o reservada" : "&nbsp;"}
+      ${isLocked ? "No editable" : "&nbsp;"}
     </div>
     <div class="mt-auto">
       <label class="block text-xs text-gray-500 mb-1">Estado</label>
@@ -340,31 +462,24 @@ function renderMesaCard(vm, estadosCatalogo, onAfterChange) {
 
   const sel = card.querySelector(".sel-estado");
 
-  // Placeholder (disabled para que NO aparezca en la lista)
   const ph = new Option("Estado", "", true, true);
   ph.disabled = true;
   sel.appendChild(ph);
-
-  // Opciones reales (de la BD), excepto Ocupada/Reservada
   for (const o of opciones) sel.appendChild(new Option(o.nombre, String(o.id)));
 
-  // Preselección si es elegible
-  if (!isLocked) {
-    const match = opciones.find(o => o.id === vm.idEstado);
-    if (match) sel.value = String(match.id);
-  }
+  const match = opciones.find(o => norm(o.nombre) === norm(vm.nombreEstado));
+  if (match) sel.value = String(match.id);
 
-  // Fancy select (sin buscador)
   upgradeSelect(sel, { placeholder: "Estado" });
 
-  // Cambio (cuando no está bloqueada)
   sel.addEventListener("change", async () => {
     if (isLocked) return;
     const nuevoId = Number(sel.value);
     if (!Number.isFinite(nuevoId) || nuevoId === vm.idEstado) return;
     try {
       sel.disabled = true;
-      await patchEstadoMesa(vm.id, nuevoId);
+      // 🔴 Usar la ruta real del backend
+      await updateMesaEstadoApi(vm.id, nuevoId);
       showAlert("success", `${vm.nomMesa}: estado actualizado`);
       onAfterChange?.();
     } catch (e) {
@@ -376,84 +491,96 @@ function renderMesaCard(vm, estadosCatalogo, onAfterChange) {
   return card;
 }
 
-/* ===== Render grid ===== */
+/* =============== Render + sync + auto-refresh =============== */
+let _mesasContainer = null;
+let _autoTimer = null;
+let _isRendering = false;
+
 async function renderMesasGrid(container) {
-  container.innerHTML = `<div class="py-10 text-center text-gray-500">Cargando mesas…</div>`;
+  if (_isRendering) return;
+  _isRendering = true;
 
-  // Estados desde nuestra función paginada
-  const [mesas, estados, pedidos, reservas] = await Promise.all([
-    getMesas(0, MAX_SIZE),
-    fetchEstadosMesa(),
-    getPedidosLight(0, MAX_SIZE),
-    getReservasLight(0, MAX_SIZE),
-  ]);
+  try {
+    if (!container.dataset._inited) {
+      container.dataset._inited = "1";
+      container.innerHTML = `<div class="py-10 text-center text-gray-500">Cargando mesas…</div>`;
+    }
 
-  if (!Array.isArray(mesas) || !mesas.length) {
-    container.innerHTML = `<div class="py-10 text-center text-gray-500">No hay mesas para mostrar.</div>`;
-    return;
+    // 1) catálogo + mesas
+    const [estados, mesas] = await Promise.all([
+      fetchEstadosMesa(),
+      getMesas(0, MAX_SIZE), // tu servicio ya pega a /apiMesa/getDataMesa
+    ]);
+
+    // 2) sincroniza BD según pedidos (PATCH reales a /apiMesa/estado/{id}/{estadoId})
+    const huboCambios = await syncMesasSegunPedidos(mesas, estados);
+
+    // 3) si hubo cambios, recarga mesas
+    const mesasFinal = huboCambios ? await getMesas(0, MAX_SIZE) : mesas;
+
+    // 4) mapa estados para etiqueta
+    const estadosById = new Map(estados.map(e => [e.id, e]));
+
+    // 5) view
+    const view = mesasFinal
+      .map(m => {
+        // MesaDTO: Id, NomMesa, IdEstadoMesa
+        const id = Number(m.Id ?? m.id ?? m.idMesa);
+        const etiqueta = m.NomMesa || m.nomMesa || m.NombreMesa || m.nombreMesa || `Mesa ${id}`;
+        const idEstado = Number(m.IdEstadoMesa ?? m.idEstadoMesa);
+        const nombreEstado = estadosById.get(idEstado)?.nombre || "";
+        return { id, nomMesa: etiqueta, idEstado, nombreEstado };
+      })
+      .sort((a,b) => {
+        const na = Number(String(a.nomMesa).match(/\d+/)?.[0] || 0);
+        const nb = Number(String(b.nomMesa).match(/\d+/)?.[0] || 0);
+        return na - nb;
+      });
+
+    // 6) render
+    container.innerHTML = "";
+    const grid = document.createElement("div");
+    grid.className = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+    container.appendChild(grid);
+
+    const refresh = () => renderMesasGrid(container);
+    view.forEach(vm => grid.appendChild(renderMesaCard(vm, estados, refresh)));
+
+  } finally {
+    _isRendering = false;
   }
-
-  const estadosById  = new Map(estados.map(e => [e.id, e]));
-  const estadosLower = new Map(estados.map(e => [humanEstado(e.nombre), e]));
-  const ID_DISPON    = estadosLower.get("disponible")?.id ?? 1;
-  const ID_OCUPADA   = estadosLower.get("ocupada")?.id    ?? 2;
-  const ID_RESERVADA = estadosLower.get("reservada")?.id  ?? 3;
-
-  // Ocupadas: cualquier pedido de esa mesa con estado != Pagado (4)
-  const ocupadasSet = new Set(
-    pedidos
-      .filter(p => Number(p.idMesa) > 0 && Number(p.idEstadoPedido) !== 4)
-      .map(p => String(p.idMesa))
-  );
-
-  // Reservadas: reservas activas HOY y en horario, estado Activa (1)
-  const reservadasSet = new Set(
-    reservas
-      .filter(r => Number(r.idMesa) > 0 && Number(r.idEstadoReserva) === 1)
-      .filter(r => isToday(r.fechaReserva))
-      .filter(r => nowBetween(r.horaInicio, r.horaFin))
-      .map(r => String(r.idMesa))
-  );
-
-  const view = mesas
-    .map(m => {
-      const id = Number(m.Id ?? m.id ?? m.idMesa);
-      const etiqueta = m.NomMesa || m.nomMesa || `Mesa ${m.Numero || id}`;
-      let idEstadoEfectivo = Number(m.IdEstadoMesa ?? m.idEstadoMesa) || ID_DISPON;
-      let lockReason = null;
-
-      if (reservadasSet.has(String(id))) { idEstadoEfectivo = ID_RESERVADA; lockReason = "reservada"; }
-      if (ocupadasSet.has(String(id)))   { idEstadoEfectivo = ID_OCUPADA;   lockReason = "ocupada";   }
-
-      const nombreEstado = estadosById.get(idEstadoEfectivo)?.nombre
-                        || (idEstadoEfectivo===ID_OCUPADA ? "Ocupada" : idEstadoEfectivo===ID_RESERVADA ? "Reservada" : "Disponible");
-
-      return { id, nomMesa: etiqueta, idEstado: idEstadoEfectivo, nombreEstado, locked: !!lockReason, lockReason };
-    })
-    .sort((a,b) => {
-      const na = Number(String(a.nomMesa).match(/\d+/)?.[0] || 0);
-      const nb = Number(String(b.nomMesa).match(/\d+/)?.[0] || 0);
-      return na - nb;
-    });
-
-  container.innerHTML = "";
-  const grid = document.createElement("div");
-  grid.className = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
-  container.appendChild(grid);
-
-  const refresh = () => renderMesasGrid(container);
-  view.forEach(vm => grid.appendChild(renderMesaCard(vm, estados, refresh)));
 }
 
-/* ===== INIT ===== */
+function startAutoRefresh() {
+  if (_autoTimer) return;
+  _autoTimer = setInterval(() => {
+    if (document.hidden) return;
+    if (_mesasContainer) renderMesasGrid(_mesasContainer);
+  }, AUTO_REFRESH_MS);
+}
+function stopAutoRefresh() {
+  if (_autoTimer) { clearInterval(_autoTimer); _autoTimer = null; }
+}
+
+/* =============== INIT =============== */
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
-  const container = $("#mesas-grid") || $("#tables-grid") || $("#mesas-container") || $("#tables-list") || $("#mesas-list");
-  if (!container) {
+  _mesasContainer = $("#mesas-grid") || $("#tables-grid") || $("#mesas-container") || $("#tables-list") || $("#mesas-list");
+  if (!_mesasContainer) {
     console.warn("[Mesas] No se encontró el contenedor (#mesas-grid | #tables-grid | #mesas-container | #tables-list | #mesas-list).");
     return;
   }
-  container.classList.add("animate-[fadeIn_.2s_ease]");
-  await renderMesasGrid(container);
+  _mesasContainer.classList.add("animate-[fadeIn_.2s_ease]");
+
+  await renderMesasGrid(_mesasContainer);
+  startAutoRefresh();
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopAutoRefresh();
+    else { startAutoRefresh(); renderMesasGrid(_mesasContainer); }
+  });
+
+  // Si otra vista cambia pedidos, dispara este evento para refrescar al instante
+  window.addEventListener("pedido:cambiado", () => renderMesasGrid(_mesasContainer));
 }

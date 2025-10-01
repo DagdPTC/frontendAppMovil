@@ -20,6 +20,62 @@ function normalizaMesa(raw) {
   };
 }
 
+// Trae TODOS los pedidos paginando (evita 400 por size grande)
+export async function fetchPedidosAll() {
+  const base = `${API_HOST}/apiPedido/getDataPedido`;
+  const sizes = [50, 25, 10];          // intenta tamaños aceptables
+  const out = [];
+
+  let page = 0;
+  let reachedEnd = false;
+
+  while (!reachedEnd && page < 500) {   // límite de seguridad
+    let ok = false, data = null, content = [];
+
+    // probamos varios tamaños por si el backend es estricto
+    for (const size of sizes) {
+      const url = `${base}?page=${page}&size=${size}`;
+      try {
+        const res = await fetch(url, {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+          cache: "no-store"
+        });
+        if (!res.ok) continue;
+        data = await res.json().catch(() => ({}));
+        content = Array.isArray(data?.content)
+          ? data.content
+          : Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data)
+          ? data
+          : Array.isArray(data?.data?.content)
+          ? data.data.content
+          : [];
+        ok = true;
+        break; // no pruebes otros sizes si este funcionó
+      } catch { /* intenta siguiente size */ }
+    }
+
+    if (!ok) break; // no se pudo esta página → salimos
+
+    out.push(...content);
+
+    // avanzar o terminar
+    if (typeof data?.last === "boolean") {
+      reachedEnd = data.last;
+      if (!reachedEnd) page += 1;
+    } else {
+      // si no hay flag "last", paramos cuando la página venga vacía
+      if (!content.length) break;
+      page += 1;
+    }
+  }
+
+  return out;
+}
+
+
 /** GET paginado: devuelve array normalizado de mesas */
 export async function getMesas(page = 0, size = 50) {
   const url = `${API.mesa}/getDataMesa?page=${encodeURIComponent(page)}&size=${encodeURIComponent(size)}`;
@@ -60,8 +116,11 @@ export async function getEstadosMesa(page = 0, size = 50) {
 /** PATCH: cambia sólo el estado de la mesa */
 export async function patchEstadoMesa(id, estadoId) {
   const url = `${API_HOST}/apiMesa/estado/${encodeURIComponent(id)}/${encodeURIComponent(estadoId)}`;
-  const res = await fetch(url, { method: "PATCH", headers: { Accept: "application/json" } });
-
+  const res = await fetch(url, {
+    method: "PATCH",
+    headers: { Accept: "application/json" },
+    credentials: "include", // ← importante si la API usa cookie de sesión
+  });
   const text = await res.text().catch(() => "");
   if (!res.ok) {
     console.error("Respuesta backend (PATCH estado):", text);
@@ -70,6 +129,7 @@ export async function patchEstadoMesa(id, estadoId) {
   try { return text ? JSON.parse(text) : { Id: Number(id), IdEstadoMesa: Number(estadoId) }; }
   catch { return { Id: Number(id), IdEstadoMesa: Number(estadoId) }; }
 }
+
 
 /** PUT (fallback): envía exactamente el DTO que tu backend acepta */
 export async function putMesaCompleta(id, dtoActual, nuevoEstadoId) {

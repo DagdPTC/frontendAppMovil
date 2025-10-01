@@ -11,10 +11,9 @@
   <link rel="stylesheet" href="css/tables.css">
 </head>
 
-<body class="bg-gray-50 font-sans">
+<body class="bg-gray-50 font-sans h-[100svh] overflow-hidden">
 
-  <div
-    class="w-full md:w-full lg:w-full mx-auto min-h-screen bg-white shadow-lg overflow-hidden relative flex flex-col">
+  <div class="w-full mx-auto h-full bg-white shadow-lg relative flex flex-col">
 
     <!-- Encabezado -->
     <nav class="bg-blue-500 text-white p-4 nav-shadow rounded-b-xl">
@@ -24,7 +23,7 @@
       </div>
     </nav>
 
-    <main class="p-4 pb-24 flex-1 overflow-y-auto">
+    <main class="p-4 pb-24 flex-1 overflow-y-auto overscroll-contain">
       <div id="mesas-page">
         <h1 class="text-xl font-semibold mb-3">Mesas</h1>
         <div id="mesas-grid"></div>
