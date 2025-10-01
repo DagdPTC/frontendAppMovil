@@ -1,32 +1,91 @@
-/* Estilo para mesas seleccionadas en el modal */
+/* ====== LISTA / GRID ====== */
+#reservations-section {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
+/* ====== CARD ====== */
+.res-card {
+  position: relative;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.04);
+  overflow: hidden;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.res-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0,0,0,.06);
+}
+.res-card__accent {
+  height: 4px;
+  width: 100%;
+}
+.res-card__accent--pending { background: #f59e0b; }  /* ámbar */
+.res-card__accent--prep    { background: #60a5fa; }  /* azul */
+.res-card__accent--paid    { background: #22c55e; }  /* verde */
+.res-card__accent--deliv   { background: #8b5cf6; }  /* violeta */
+
+.res-card__body {
+  padding: 14px 14px 10px 14px;
+}
+.res-card__top {
+  display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;
+}
+.res-card__title {
+  font-size:.75rem; font-weight:700; color:#6b7280; letter-spacing:.04em;
+}
+
+/* ====== KEY-VALUE filas cortas ====== */
+.kv { display:flex; gap:6px; font-size:.875rem; margin: 4px 0; }
+.kv__k { width:64px; color:#6b7280; }
+.kv__v { color:#111827; }
+
+/* ====== DETALLE PLEGABLE ====== */
+.res-card__details {
+  margin-top: 8px;
+  border-top: 1px solid #f3f4f6;
+  padding-top: 10px;
+  padding-bottom: 12px;
+}
+.detail-row { display:flex; gap:8px; font-size:.85rem; line-height:1.35; margin: 3px 0; }
+.detail-row__k { width:80px; color:#6b7280; }
+.detail-row__v { color:#111827; }
+
+/* ====== ACCIONES ====== */
+.res-card__actions {
+  display:flex; gap:14px; padding: 8px 14px 14px; border-top: 1px dashed #e5e7eb;
+}
+.btn-link {
+  color:#2563eb; font-weight:600; font-size:.9rem; padding: 4px 0; border:0; background:transparent; cursor:pointer;
+}
+.btn-link:hover { text-decoration: underline; }
+.btn-danger {
+  color:#ef4444; font-weight:600; font-size:.9rem; padding: 4px 0; border:0; background:transparent; cursor:pointer;
+}
+.btn-danger:hover { text-decoration: underline; }
+
+/* ====== BADGES / BOTONES ====== */
+.badge {
+  display:inline-block; padding: 3px 8px; border-radius: 9999px; font-size: .70rem;
+  font-weight:600; border:1px solid transparent; color:#374151; background:#f3f4f6;
+}
+.badge--pending { background:#fff7ed; border-color:#f59e0b33; color:#92400e; }
+.badge--prep    { background:#eff6ff; border-color:#60a5fa33; color:#1d4ed8; }
+.badge--paid    { background:#ecfdf5; border-color:#22c55e33; color:#065f46; }
+.badge--deliv   { background:#f5f3ff; border-color:#8b5cf633; color:#5b21b6; }
+
+.btn-detail {
+  font-size:.85rem; color:#374151; background: #f3f4f6; border: 1px solid #e5e7eb;
+  border-radius: 9999px; padding: 4px 10px; cursor: pointer;
+}
+.btn-detail:hover { background:#e5e7eb; }
+
+/* ====== UTILIDAD (mesas/platillos seleccionados) ====== */
 .mesa-btn-selected {
-    background-color: #3b82f6 !important;
-    color: white !important;
+  background: #e0f2fe !important;
+  border-color: #93c5fd !important;
 }
-
-/* Mejora visual cuando el botón está en hover */
-button:hover.mesa-btn-selected {
-    background-color: #2563eb !important;
-}
-
-/* Texto del resumen de mesas seleccionadas */
-#selected-tables-text {
-    font-size: 0.875rem;
-    color: #4b5563;
-}
-
-@keyframes fadeSlideIn {
-    from {
-        opacity: 0;
-        transform: translateY(20px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.fadeSlideIn {
-    animation: fadeSlideIn 0.4s ease-out forwards;
-}
-

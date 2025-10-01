@@ -1,170 +1,43 @@
-// js/controllers/reservationsController.js
-// Conecta tu UI con la API y agrega máscara/validaciones de hora y tope de personas.
+// js/controllers/reservaController.js
+// Revert estable + fixes: combo de Tipo Evento, modal de Mesas autoconstruido y create ok.
 
 import {
   getReserva,
   createReserva,
   updateReserva,
   deleteReserva,
+  getTiposReserva,
+  getMesas,
 } from "../services/reservaService.js";
 
-// ----------------------- UTILIDADES -----------------------
-const $ = (s, r = document) => r.querySelector(s);
+// ---------- utils ----------
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = (x) => String(x ?? "").replace(/[&<>"']/g, (s) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[s]));
+const clamp=(n,min,max)=>Math.min(Math.max(n,min),max);
 
-function escapeHTML(str) {
-  return String(str || "").replace(/[&<>"']/g, (s) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  }[s]));
+function parseTime12(str){
+  const m=String(str||"").match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+  if(!m) return null;
+  let h=+m[1]; let mi=m[2]!==undefined?+m[2]:0;
+  if(!Number.isFinite(h)||!Number.isFinite(mi)) return null;
+  h=clamp(h,1,12); mi=clamp(mi,0,59); return {h,m:mi};
 }
-function clamp(n, min, max) { return Math.min(Math.max(n, min), max); }
-function countDigits(str) { return (String(str).match(/\d/g) || []).length; }
-
-function parseTime12(str) {
-  const m = String(str || "").match(/^(\d{1,2})(?::(\d{1,2}))?$/);
-  if (!m) return null;
-  let h = parseInt(m[1], 10);
-  let mi = m[2] !== undefined ? parseInt(m[2], 10) : 0;
-  if (!Number.isFinite(h) || !Number.isFinite(mi)) return null;
-  h = clamp(h, 1, 12);
-  mi = clamp(mi, 0, 59);
-  return { h, m: mi };
+function normalizeTimeForSave(v){
+  if(!v) return ""; const m=String(v).trim().match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+  if(!m) return ""; let h=+m[1]; let mi=m[2]!==undefined?+m[2]:0;
+  h=clamp(h,1,12); mi=clamp(mi,0,59); return `${h}:${String(mi).padStart(2,"0")}`;
 }
-function normalizeTimeForSave(v) {
-  if (!v) return "";
-  const m = String(v).trim().match(/^(\d{1,2})(?::(\d{1,2}))?$/);
-  if (!m) return "";
-  let h = parseInt(m[1], 10);
-  let mi = m[2] !== undefined ? parseInt(m[2], 10) : 0;
-  if (!Number.isFinite(h)) return "";
-  h = clamp(h, 1, 12);
-  mi = Number.isFinite(mi) ? clamp(mi, 0, 59) : 0;
-  return `${h}:${String(mi).padStart(2, "0")}`;
-}
-function toMinutesFrom12(hhmm, ampm) {
-  const t = parseTime12(hhmm);
-  if (!t) return NaN;
-  let h24 = t.h % 12;
-  if ((ampm || "").toUpperCase() === "PM") h24 += 12;
-  return h24 * 60 + t.m;
-}
-function hourLabel(hStr, ampm) {
-  const t = parseTime12(hStr);
-  if (!t) return `${hStr || ""} ${ampm || ""}`.trim();
-  return `${t.h}:${String(t.m).padStart(2, "0")}${ampm ? " " + ampm : ""}`;
-}
-function formatDateLabel(yyyy_mm_dd) {
-  if (!yyyy_mm_dd) return "";
-  const d = new Date(yyyy_mm_dd + "T00:00:00");
-  return d.toLocaleDateString("es-ES", { day: "2-digit", month: "short" });
-}
+function toMinutesFrom12(hhmm,ampm){ const t=parseTime12(hhmm); if(!t) return NaN; let h24=t.h%12; if((ampm||"").toUpperCase()==="PM") h24+=12; return h24*60+t.m;}
+const hourLabel=(h,a)=>{const t=parseTime12(h); return t?`${t.h}:${String(t.m).padStart(2,"0")}${a?" "+a:""}`:`${h||""} ${a||""}`.trim();};
+const formatDateLabel=(d)=> d?new Date(d+"T00:00:00").toLocaleDateString("es-ES",{day:"2-digit",month:"short"}):"";
 
-// -------- Máscara de hora tipo “teléfono” (12:59) con caret inteligente --------
-function caretDigitsBefore(el) {
-  const before = el.value.slice(0, el.selectionStart ?? el.value.length);
-  return countDigits(before);
-}
-function placeCaretByDigitIndex(el, digitIndex) {
-  let pos = Math.min(digitIndex, 4);
-  if (pos > 2) pos += 1; // saltar ":"
-  try { el.setSelectionRange(pos, pos); } catch {}
-}
-function buildTimeFromDigits(d) {
-  let arr = String(d).replace(/\D/g, "").slice(0, 4).split("");
-
-  // no permitir "0" inicial de hora
-  while (arr.length && arr[0] === "0") arr.shift();
-  if (arr.length === 0) return "";
-
-  // Hora: 1 dígito, salvo 10–12
-  let hourDigits = [];
-  if (arr.length >= 2) {
-    const two = parseInt(arr[0] + arr[1], 10);
-    if (two >= 10 && two <= 12) {
-      hourDigits = [arr.shift(), arr.shift()];
-    } else {
-      hourDigits = [arr.shift()];
-    }
-  } else {
-    hourDigits = [arr.shift()];
-  }
-
-  let hour = parseInt(hourDigits.join(""), 10);
-  hour = clamp(hour, 1, 12);
-
-  // Minutos: primer dígito 0–5; si ponen 7 -> "07"; máximo 59
-  let minuteDigits = arr.slice(0, 2);
-  if (minuteDigits.length >= 1 && parseInt(minuteDigits[0], 10) > 5) {
-    minuteDigits = ["0", minuteDigits[0]];
-  }
-  if (minuteDigits.length === 2) {
-    const val = parseInt(minuteDigits.join(""), 10);
-    if (val > 59) minuteDigits = ["5", "9"];
-  }
-
-  return minuteDigits.length ? `${hour}:${minuteDigits.join("")}` : `${hour}`;
-}
-function attachTimeMask(el) {
-  if (!el) return;
-
-  // Fuerza UX tipo teléfono
-  el.type = "text";
-  el.setAttribute("inputmode", "numeric");
-  el.setAttribute("placeholder", "12:59");
-  el.autocomplete = "off";
-
-  // Borrar sobre ":" manteniendo caret lógico
-  el.addEventListener("keydown", (e) => {
-    const pos = el.selectionStart ?? 0;
-    if (e.key === "Backspace" && pos > 0 && el.value[pos - 1] === ":") {
-      e.preventDefault();
-      const before = el.value.slice(0, pos - 1);
-      const after = el.value.slice(pos);
-      const digits = (before + after).replace(/\D/g, "");
-      el.value = buildTimeFromDigits(digits);
-      placeCaretByDigitIndex(el, countDigits(before));
-    } else if (e.key === "Delete" && el.value[pos] === ":") {
-      e.preventDefault();
-      const before = el.value.slice(0, pos);
-      const after = el.value.slice(pos + 1);
-      const digits = (before + after).replace(/\D/g, "");
-      el.value = buildTimeFromDigits(digits);
-      placeCaretByDigitIndex(el, countDigits(before));
-    }
-  });
-
-  // Re-formato en cada input
-  el.addEventListener("input", () => {
-    const di = caretDigitsBefore(el);
-    const digits = el.value.replace(/\D/g, "").slice(0, 4);
-    el.value = buildTimeFromDigits(digits);
-    placeCaretByDigitIndex(el, Math.min(di, digits.length));
-  });
-
-  // Pegar: conserva solo dígitos
-  el.addEventListener("paste", (e) => {
-    e.preventDefault();
-    const text = (e.clipboardData || window.clipboardData).getData("text");
-    const digits = String(text).replace(/\D/g, "").slice(0, 4);
-    el.value = buildTimeFromDigits(digits);
-    placeCaretByDigitIndex(el, digits.length);
-  });
-
-  // Al salir, completa HH:MM
-  el.addEventListener("blur", () => {
-    el.value = normalizeTimeForSave(el.value);
-  });
-}
-
-// ----------------------- ESTADO -----------------------
+// ---------- estado ----------
 let editingId = null;
 let mesasSeleccionadas = [];
 let platillosSeleccionados = [];
 
-// ----------------------- NODOS DEL DOM -----------------------
+// ---------- DOM ----------
 const reservationsSection   = $("#reservations-section");
 const buttonSection         = $("#button-section");
 const newReservationBtn     = $("#new-reservation-btn");
@@ -195,436 +68,357 @@ const tablesError    = $("#tables-error");
 const dishesError    = $("#dishes-error");
 
 const selectTablesBtn    = $("#select-tables-btn");
-const tablesModal        = $("#tables-modal");
-const closeTablesModal   = $("#close-tables-modal");
-const cancelTablesBtn    = $("#cancel-tables-btn");
-const saveTablesBtn      = $("#save-tables-btn");
-const tablesGrid         = $("#tables-grid");
 const selectedTablesText = $("#selected-tables-text");
 
-const selectDishesBtn    = $("#select-dishes-btn");
-const dishesModal        = $("#dishes-modal");
-const closeDishesModal   = $("#close-dishes-modal");
-const cancelDishesBtn    = $("#cancel-dishes-btn");
-const saveDishesBtn      = $("#save-dishes-btn");
-const dishesGrid         = $("#dishes-grid");
-const selectedDishesText = $("#selected-dishes-text");
-
-// Título del formulario
 const formTitle = $("#reservation-form-title");
 
-// ----------------------- MODO FORM -----------------------
-function setFormModeCreate() {
-  if (formTitle) formTitle.textContent = "Nueva reserva";
-  if (saveReservationBtn) saveReservationBtn.textContent = "Guardar Reserva";
-  editingId = null;
-}
-function setFormModeEdit(nombreCliente) {
-  if (formTitle) formTitle.textContent = `Editar reserva de ${nombreCliente || ""}`.trim();
-  if (saveReservationBtn) saveReservationBtn.textContent = "Actualizar Reserva";
-}
+// ---------- form mode ----------
+function setFormModeCreate(){ formTitle&&(formTitle.textContent="Nueva reserva"); saveReservationBtn&&(saveReservationBtn.textContent="Guardar Reserva"); editingId=null; }
+function setFormModeEdit(n){ formTitle&&(formTitle.textContent=`Editar reserva de ${n||""}`.trim()); saveReservationBtn&&(saveReservationBtn.textContent="Actualizar Reserva"); }
 
-// ----------------------- API <-> UI MAPS -----------------------
-function apiToUI(row) {
-  const id       = row.id ?? row.Id ?? row.idReserva ?? row.IdReserva ?? null;
-  const fReserva = row.fReserva ?? row.FReserva ?? row.freserva ?? row.fecha ?? "";
-  const horaI    = row.horaI ?? row.HoraI ?? row.horai ?? "";
-  const horaF    = row.horaF ?? row.HoraF ?? row.horaf ?? "";
-  const cliente  = row.nombreCliente ?? row.NombreCliente ?? row.cliente ?? "";
-  const tel      = row.telefono ?? row.Telefono ?? "";
-  const cant     = row.cantidadPersonas ?? row.CantidadPersonas ?? row.personas ?? 1;
-  const evento   = row.evento ?? row.Evento ?? "";
-  const coment   = row.comentario ?? row.Comentario ?? "";
-  const mesas    = Array.isArray(row.mesas) ? row.mesas.map(Number) : (row.idMesa != null ? [Number(row.idMesa)] : []);
+// ---------- map API <-> UI ----------
+function apiToUI(r){
+  const id       = r.id ?? r.Id ?? r.idReserva ?? r.IdReserva ?? null;
+  const fReserva = r.fReserva ?? r.FReserva ?? r.freserva ?? r.fecha ?? "";
+  const horaI    = r.horaI ?? r.HoraI ?? r.horai ?? "";
+  const horaF    = r.horaF ?? r.HoraF ?? r.horaf ?? "";
+  const cliente  = r.nombreCliente ?? r.NombreCliente ?? r.cliente ?? "";
+  const tel      = r.telefono ?? r.Telefono ?? "";
+  const cant     = r.cantidadPersonas ?? r.CantidadPersonas ?? r.personas ?? 1;
+  const evento   = r.evento ?? r.Evento ?? "";
+  const coment   = r.comentario ?? r.Comentario ?? "";
+  const mesas    = Array.isArray(r.mesas) ? r.mesas.map(Number) : (r.idMesa != null ? [Number(r.idMesa)] : []);
   return {
     id,
     clientName: cliente,
     clientPhone: tel,
     date: String(fReserva),
     timeStart: String(horaI),
-    startAmPm: row.startAmPm ?? "AM",
+    startAmPm: r.startAmPm ?? "AM",
     timeEnd: String(horaF),
-    endAmPm: row.endAmPm ?? "AM",
+    endAmPm: r.endAmPm ?? "AM",
     people: Number(cant) || 1,
     event: String(evento || ""),
     comment: String(coment || ""),
     tables: mesas,
-    dishes: Array.isArray(row.platillos) ? row.platillos : [],
+    dishes: Array.isArray(r.platillos) ? r.platillos : [],
+    status: r.estado ?? "Pendiente",
+    total: r.total ?? 0,
   };
 }
-function uiToApiPayload() {
+function uiToApiPayload(){
   const horaI = normalizeTimeForSave(timeStartInput.value);
   const horaF = normalizeTimeForSave(timeEndInput.value);
   return {
-    nombreCliente: clientNameInput.value.trim(),
-    telefono: clientPhoneInput.value.trim(),
-    fReserva: dateInput.value,
-    horaI,
-    horaF,
-    cantidadPersonas: parseInt(peopleInput.value || "1", 10),
-    evento: eventSelect.value,
-    comentario: commentInput.value.trim(),
+    nombreCliente: clientNameInput?.value.trim(),
+    telefono: clientPhoneInput?.value.trim(),
+    fReserva: dateInput?.value,
+    horaI, horaF,
+    cantidadPersonas: parseInt(peopleInput?.value || "1", 10),
+    evento: eventSelect?.value,
+    comentario: commentInput?.value.trim(),
     idMesa: mesasSeleccionadas.length ? Number(mesasSeleccionadas[0]) : null,
     mesas: mesasSeleccionadas.map(Number),
-    platillos: (platillosSeleccionados || []).map((d) =>
-      typeof d === "string"
-        ? { nombre: d, cantidad: 1 }
-        : { nombre: d.nombre || d.name || "", cantidad: d.cantidad ?? d.qty ?? 1, precio: d.precio ?? d.price ?? 0 }
+    platillos: (platillosSeleccionados||[]).map((d)=>
+      typeof d==="string" ? {nombre:d,cantidad:1}
+      : {nombre:d.nombre||d.name||"", cantidad:d.cantidad??d.qty??1, precio:d.precio??d.price??0}
     ),
   };
 }
 
-// ----------------------- RENDER LISTA -----------------------
-let reservationsList = $("#reservations-list", reservationsSection);
+// ---------- render lista ----------
+let reservationsList  = $("#reservations-list", reservationsSection);
+let reservationsEmpty = $("#reservations-empty", reservationsSection);
 if (!reservationsList) {
   reservationsList = document.createElement("div");
   reservationsList.id = "reservations-list";
-  reservationsList.className = "space-y-4";
-  reservationsSection.appendChild(reservationsList);
+  reservationsSection?.appendChild(reservationsList);
 }
-let reservationsEmpty = $("#reservations-empty", reservationsSection);
 if (!reservationsEmpty) {
   reservationsEmpty = document.createElement("div");
   reservationsEmpty.id = "reservations-empty";
   reservationsEmpty.className = "text-gray-500";
   reservationsEmpty.textContent = "Aún no hay reservas. Crea la primera con el botón “Nueva reserva”.";
-  reservationsSection.insertBefore(reservationsEmpty, reservationsList);
+  reservationsSection?.insertBefore(reservationsEmpty, reservationsList);
 }
 
-function renderReservations(data) {
+function statusAccent(s){ s=String(s||"").toLowerCase(); if(s.includes("prep"))return"res-card__accent--prep"; if(s.includes("paga"))return"res-card__accent--paid"; if(s.includes("entreg"))return"res-card__accent--deliv"; return"res-card__accent--pending";}
+function statusBadge(s){ s=String(s||"").toLowerCase(); if(s.includes("prep"))return{cls:"badge--prep",txt:"En preparación"}; if(s.includes("paga"))return{cls:"badge--paid",txt:"Pagado"}; if(s.includes("entreg"))return{cls:"badge--deliv",txt:"Entregado"}; return{cls:"badge--pending",txt:"Pendiente"};}
+
+function renderReservations(list){
   reservationsList.innerHTML = "";
-  if (!Array.isArray(data) || data.length === 0) {
-    reservationsEmpty.classList.remove("hidden");
-    return;
-  }
+  if (!Array.isArray(list) || list.length === 0) { reservationsEmpty.classList.remove("hidden"); return; }
   reservationsEmpty.classList.add("hidden");
 
-  data.forEach((r) => {
-    const card = document.createElement("div");
-    card.className =
-      "bg-white border border-gray-200 rounded-lg p-4 flex flex-col gap-2 hover:bg-gray-50 transition cursor-pointer";
-
-    card.innerHTML = `
-      <div class="flex justify-between items-start">
-        <div>
-          <h3 class="font-bold text-gray-800">${escapeHTML(r.clientName)}</h3>
-          <p class="text-xs text-gray-500">
-            ${formatDateLabel(r.date)} — ${hourLabel(r.timeStart, r.startAmPm)} a ${hourLabel(r.timeEnd, r.endAmPm)}
-          </p>
+  list.forEach((r)=>{
+    const badge=statusBadge(r.status); const accent=statusAccent(r.status);
+    const card=document.createElement("div");
+    card.className="res-card";
+    card.innerHTML=`
+      <div class="res-card__accent ${accent}"></div>
+      <div class="res-card__body">
+        <div class="res-card__top">
+          <div class="res-card__title">CLIENTE</div>
+          <button class="btn-detail js-toggle" type="button">Detalle ▾</button>
         </div>
-        <div class="flex gap-2">
-          <button class="edit-btn text-blue-600 hover:text-blue-700 font-medium text-sm" data-id="${r.id}">Editar</button>
-          <button class="delete-btn text-red-600 hover:text-red-700 font-medium text-sm" data-id="${r.id}">Eliminar</button>
+        <div class="kv"><div class="kv__k">Mesa:</div><div class="kv__v">${esc((r.tables && r.tables[0]) || "—")}</div></div>
+        <div class="kv"><div class="kv__k">Fecha:</div><div class="kv__v">${formatDateLabel(r.date)} — ${hourLabel(r.timeStart,r.startAmPm)} a ${hourLabel(r.timeEnd,r.endAmPm)}</div></div>
+        <div class="kv"><div class="kv__k">Evento:</div><div class="kv__v">${esc(r.event||"—")}</div></div>
+        <div style="margin-top:8px;">
+          <span class="badge ${badge.cls}">${badge.txt}</span>
+          <span style="float:right;color:#111827;font-weight:700;">Total $${Number(r.total||0).toFixed(2)}</span>
         </div>
+        <div class="res-card__details"></div>
       </div>
-      <div class="text-sm text-gray-700">
-        <div class="flex justify-between">
-          <span>Mesas: ${r.tables?.length ? r.tables.join(", ") : "—"}</span>
-          <span class="font-medium">${r.people} ${r.people === 1 ? "persona" : "personas"}</span>
-        </div>
-        <p><span class="font-medium">Evento:</span> ${escapeHTML(r.event || "—")}</p>
-        ${r.comment ? `<p class="text-gray-600 mt-1">${escapeHTML(r.comment)}</p>` : ""}
-      </div>
-    `;
+      <div class="res-card__actions">
+        <button class="btn-link js-edit" type="button">Editar</button>
+        <button class="btn-danger js-del" type="button">Eliminar</button>
+      </div>`;
 
-    card.querySelector(".edit-btn").addEventListener("click", (e) => {
-      e.stopPropagation();
-      startEditing(r);
-    });
-    card.querySelector(".delete-btn").addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (!confirm("¿Eliminar esta reserva?")) return;
-      try {
-        if (!r.id && r.id !== 0) throw new Error("Reserva sin ID válido.");
-        await deleteReserva(r.id);
-        await loadFromAPI();
-      } catch (err) {
-        console.error("[Eliminar] Error:", err);
-        alert("No se pudo eliminar. Revisa la consola para más detalle.");
-      }
-    });
-    card.addEventListener("click", () => startEditing(r));
+    const detBtn=card.querySelector(".js-toggle");
+    const detBox=card.querySelector(".res-card__details");
+    detBox.innerHTML=`
+      <div class="detail-row"><div class="detail-row__k">Cliente:</div><div class="detail-row__v">${esc(r.clientName||"—")}</div></div>
+      <div class="detail-row"><div class="detail-row__k">Teléfono:</div><div class="detail-row__v">${esc(r.clientPhone||"—")}</div></div>
+      <div class="detail-row"><div class="detail-row__k">Mesas:</div><div class="detail-row__v">${r.tables?.length?r.tables.join(", "):"—"}</div></div>
+      <div class="detail-row"><div class="detail-row__k">Platillos:</div><div class="detail-row__v">${(r.dishes&&r.dishes.length)?r.dishes.map(d=>esc(typeof d==="string"?d:(d.nombre||d.name||""))).join(", "):"—"}</div></div>
+      <div class="detail-row"><div class="detail-row__k">Notas:</div><div class="detail-row__v">${esc(r.comment||"—")}</div></div>`;
+    detBox.style.maxHeight="0px"; detBox.style.overflow="hidden"; detBox.style.transition="max-height .25s ease, padding .25s ease, border-color .25s ease"; detBox.style.paddingTop="0"; detBox.style.paddingBottom="0"; detBox.style.borderTop="1px solid"; detBox.style.borderTopColor="transparent"; detBox.dataset.opened="0";
+    detBtn.addEventListener("click",(e)=>{e.stopPropagation(); const opened=detBox.dataset.opened==="1"; if(opened){detBox.style.maxHeight="0px"; detBox.style.paddingTop="0"; detBox.style.paddingBottom="0"; detBox.style.borderTopColor="transparent"; detBox.dataset.opened="0"; detBtn.textContent="Detalle ▾";} else {detBox.style.maxHeight=detBox.scrollHeight+"px"; detBox.style.paddingTop="10px"; detBox.style.paddingBottom="12px"; detBox.style.borderTopColor="#f3f4f6"; detBox.dataset.opened="1"; detBtn.textContent="Detalle ▴";}});
+
+    card.querySelector(".js-edit").addEventListener("click",()=>startEditing(r));
+    card.querySelector(".js-del").addEventListener("click", async ()=>{ if(!confirm("¿Eliminar esta reserva?")) return; await deleteReserva(r.id); await loadFromAPI(); });
 
     reservationsList.appendChild(card);
   });
 }
 
-// ----------------------- CARGA DESDE API -----------------------
-async function loadFromAPI() {
-  try {
-    const apiList = await getReserva();
-    const uiList = (Array.isArray(apiList) ? apiList : []).map(apiToUI);
-    renderReservations(uiList);
-  } catch (err) {
-    console.error("[Cargar] Error:", err);
-    reservationsList.innerHTML = "";
-    reservationsEmpty.classList.remove("hidden");
-  }
+// ---------- cargar ----------
+async function loadFromAPI(){
+  const apiList = await getReserva();
+  const uiList  = (Array.isArray(apiList)?apiList:[]).map(apiToUI);
+  renderReservations(uiList);
 }
 
-// ----------------------- NUEVA / EDITAR -----------------------
-function openForm() {
-  reservationsSection.classList.add("hidden");
-  buttonSection.classList.add("hidden");
-  reservationForm.classList.remove("hidden");
-  reservationForm.classList.remove("fadeSlideIn");
-  void reservationForm.offsetWidth;
-  reservationForm.classList.add("fadeSlideIn");
-  try { reservationForm.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {}
-}
-function closeForm() {
-  reservationForm.classList.add("hidden");
-  reservationsSection.classList.remove("hidden");
-  buttonSection.classList.remove("hidden");
-}
-function clearForm() {
-  editingId = null;
-  clientNameInput.value = "";
-  clientPhoneInput.value = "";
-  dateInput.value = "";
-  timeStartInput.value = "";
-  timeEndInput.value = "";
-  startAmPmSelect.value = "AM";
-  endAmPmSelect.value = "AM";
-  peopleInput.value = "";
-  eventSelect.value = "";
-  commentInput.value = "";
-  mesasSeleccionadas = [];
-  platillosSeleccionados = [];
-  selectedTablesText.textContent = "";
-  selectedDishesText.textContent = "Ningún platillo seleccionado.";
-  [clientError, phoneError, dateError, timeStartError, timeEndError, peopleError, eventError, tablesError, dishesError]
-    .forEach((e) => e?.classList.add("hidden"));
+// ---------- nueva/editar ----------
+function openForm(){ reservationsSection?.classList.add("hidden"); buttonSection?.classList.add("hidden"); reservationForm?.classList.remove("hidden"); }
+function closeForm(){ reservationForm?.classList.add("hidden"); reservationsSection?.classList.remove("hidden"); buttonSection?.classList.remove("hidden"); }
+function clearForm(){
+  editingId=null;
+  clientNameInput&&(clientNameInput.value="");
+  clientPhoneInput&&(clientPhoneInput.value="");
+  dateInput&&(dateInput.value="");
+  timeStartInput&&(timeStartInput.value="");
+  timeEndInput&&(timeEndInput.value="");
+  startAmPmSelect&&(startAmPmSelect.value="AM");
+  endAmPmSelect&&(endAmPmSelect.value="AM");
+  peopleInput&&(peopleInput.value="");
+  eventSelect&&(eventSelect.value="");
+  commentInput&&(commentInput.value="");
+  mesasSeleccionadas=[]; platillosSeleccionados=[];
+  selectedTablesText&&(selectedTablesText.textContent="Ninguna mesa seleccionada.");
+  [clientError, phoneError, dateError, timeStartError, timeEndError, peopleError, eventError, tablesError, dishesError].forEach(e=>e?.classList.add("hidden"));
   setFormModeCreate();
 }
-function startEditing(r) {
-  editingId = r.id ?? null;
-  clientNameInput.value = r.clientName || "";
-  clientPhoneInput.value = r.clientPhone || "";
-  dateInput.value = r.date || "";
-  timeStartInput.value = r.timeStart || "";
-  timeEndInput.value = r.timeEnd || "";
-  startAmPmSelect.value = r.startAmPm || "AM";
-  endAmPmSelect.value = r.endAmPm || "AM";
-  peopleInput.value = String(r.people || "");
-  eventSelect.value = r.event || "";
-  commentInput.value = r.comment || "";
-
-  mesasSeleccionadas = Array.isArray(r.tables) ? r.tables.slice() : [];
-  platillosSeleccionados = Array.isArray(r.dishes) ? r.dishes.slice() : [];
-
-  selectedTablesText.textContent = mesasSeleccionadas.length
-    ? "Mesas seleccionadas: " + mesasSeleccionadas.sort((a, b) => a - b).join(", ")
-    : "Ninguna mesa seleccionada.";
-  selectedDishesText.textContent =
-    platillosSeleccionados.length
-      ? "Platillos: " + platillosSeleccionados.map((d) => (typeof d === "string" ? d : (d.nombre || d.name || ""))).join(", ")
-      : "Ningún platillo seleccionado.";
-
-  setFormModeEdit(r.clientName || r.client || "");
-  openForm();
+function startEditing(r){
+  editingId=r.id??null;
+  clientNameInput&&(clientNameInput.value=r.clientName||"");
+  clientPhoneInput&&(clientPhoneInput.value=r.clientPhone||"");
+  dateInput&&(dateInput.value=r.date||"");
+  timeStartInput&&(timeStartInput.value=r.timeStart||"");
+  timeEndInput&&(timeEndInput.value=r.timeEnd||"");
+  startAmPmSelect&&(startAmPmSelect.value=r.startAmPm||"AM");
+  endAmPmSelect&&(endAmPmSelect.value=r.endAmPm||"AM");
+  peopleInput&&(peopleInput.value=String(r.people||""));
+  eventSelect&&(eventSelect.value=r.event||"");
+  commentInput&&(commentInput.value=r.comment||"");
+  mesasSeleccionadas=Array.isArray(r.tables)?r.tables.slice():[];
+  selectedTablesText&&(selectedTablesText.textContent=mesasSeleccionadas.length?`Mesas seleccionadas: ${mesasSeleccionadas.join(", ")}`:"Ninguna mesa seleccionada.");
+  setFormModeEdit(r.clientName||r.client||""); openForm();
 }
 
-// ----------------------- VALIDACIÓN Y GUARDAR -----------------------
-function validateForm() {
-  let ok = true;
+// ---------- validación + guardar ----------
+function validateForm(){
+  let ok=true;
+  if (clientNameInput && clientNameInput.value.trim()===""){clientError?.classList.remove("hidden"); ok=false;} else clientError?.classList.add("hidden");
+  if (clientPhoneInput){ const d=clientPhoneInput.value.replace(/\D/g,""); if(d.length!==8){phoneError?.classList.remove("hidden"); ok=false;} else phoneError?.classList.add("hidden"); }
+  if (dateInput && dateInput.value===""){dateError?.classList.remove("hidden"); ok=false;} else dateError?.classList.add("hidden");
 
-  // Cliente
-  if (clientNameInput.value.trim() === "") { clientError.classList.remove("hidden"); ok = false; }
-  else clientError.classList.add("hidden");
+  timeStartInput&&(timeStartInput.value=normalizeTimeForSave(timeStartInput.value));
+  timeEndInput&&(timeEndInput.value=normalizeTimeForSave(timeEndInput.value));
+  const s=toMinutesFrom12(timeStartInput?.value,startAmPmSelect?.value);
+  const e=toMinutesFrom12(timeEndInput?.value,endAmPmSelect?.value);
+  if(!Number.isFinite(s)){timeStartError&& (timeStartError.textContent="Hora inválida."); timeStartError?.classList.remove("hidden"); ok=false;} else timeStartError?.classList.add("hidden");
+  if(!Number.isFinite(e)){timeEndError&& (timeEndError.textContent="Hora inválida."); timeEndError?.classList.remove("hidden"); ok=false;} else timeEndError?.classList.add("hidden");
+  if(Number.isFinite(s)&&Number.isFinite(e)&&e<=s){timeEndError&& (timeEndError.textContent="La hora fin debe ser posterior a la hora inicio."); timeEndError?.classList.remove("hidden"); ok=false;}
 
-  // Teléfono: 8 dígitos (con guion -> 9 chars)
-  const phoneDigits = clientPhoneInput.value.replace(/\D/g, "");
-  if (phoneDigits.length !== 8) { phoneError.classList.remove("hidden"); ok = false; }
-  else phoneError.classList.add("hidden");
+  const ppl=parseInt(peopleInput?.value||"0",10);
+  if(!Number.isFinite(ppl)||ppl<=0){ peopleError&&(peopleError.textContent="Ingrese la cantidad de personas."); peopleError?.classList.remove("hidden"); ok=false;}
+  else if(ppl>200){ peopleError&&(peopleError.textContent="Máximo 200 personas."); peopleError?.classList.remove("hidden"); ok=false;}
+  else peopleError?.classList.add("hidden");
 
-  // Fecha
-  if (dateInput.value === "") { dateError.classList.remove("hidden"); ok = false; }
-  else dateError.classList.add("hidden");
+  if(eventSelect && (!eventSelect.value || eventSelect.value==="(sin permiso)")){eventError?.classList.remove("hidden"); ok=false;} else eventError?.classList.add("hidden");
 
-  // Horas (formato y orden)
-  timeStartInput.value = normalizeTimeForSave(timeStartInput.value);
-  timeEndInput.value   = normalizeTimeForSave(timeEndInput.value);
-
-  const tS = parseTime12(timeStartInput.value);
-  const tE = parseTime12(timeEndInput.value);
-
-  if (!tS) { timeStartError.textContent = "Hora inválida. Usa el formato 12:59."; timeStartError.classList.remove("hidden"); ok = false; }
-  else timeStartError.classList.add("hidden");
-
-  if (!tE) { timeEndError.textContent = "Hora inválida. Usa el formato 12:59."; timeEndError.classList.remove("hidden"); ok = false; }
-  else timeEndError.classList.add("hidden");
-
-  if (tS && tE) {
-    const startM = toMinutesFrom12(timeStartInput.value, startAmPmSelect.value);
-    const endM   = toMinutesFrom12(timeEndInput.value,   endAmPmSelect.value);
-    if (!Number.isFinite(startM) || !Number.isFinite(endM) || endM <= startM) {
-      timeEndError.textContent = "La hora fin debe ser posterior a la hora inicio.";
-      timeEndError.classList.remove("hidden");
-      ok = false;
-    } else {
-      timeEndError.classList.add("hidden");
-    }
-  }
-
-  // Personas
-  const ppl = parseInt(peopleInput.value || "0", 10);
-  if (!Number.isFinite(ppl) || ppl <= 0) { peopleError.textContent = "Ingrese la cantidad de personas."; peopleError.classList.remove("hidden"); ok = false; }
-  else if (ppl > 200) { peopleError.textContent = "Máximo 200 personas."; peopleError.classList.remove("hidden"); ok = false; }
-  else peopleError.classList.add("hidden");
-
-  // Evento
-  if (eventSelect.value === "") { eventError.classList.remove("hidden"); ok = false; }
-  else eventError.classList.add("hidden");
-
-  // Mesas
-  if (!mesasSeleccionadas.length) {
-    tablesError.textContent = "Por favor seleccione las mesas.";
-    tablesError.classList.remove("hidden");
-    ok = false;
-  } else {
-    tablesError.classList.add("hidden");
-  }
+  if(!mesasSeleccionadas.length){ tablesError&&(tablesError.textContent="Por favor seleccione las mesas."); tablesError?.classList.remove("hidden"); ok=false;}
+  else tablesError?.classList.add("hidden");
 
   return ok;
 }
 
-async function handleSave() {
-  if (!validateForm()) return;
+async function handleSave(){
+  if(!validateForm()) return;
+  const payload=uiToApiPayload();
+  try{
+    if(editingId!=null) await updateReserva(editingId,payload);
+    else                await createReserva(payload);
+    await loadFromAPI(); clearForm(); closeForm();
+  }catch(err){ console.error("[Guardar] Error:",err); alert("No se pudo guardar. Revisa la consola para más detalle."); }
+}
 
-  const payload = uiToApiPayload();
+// ---------- Modal Mesas (autoconstruido si falta) ----------
+function ensureTablesModal() {
+  let modal = $("#tables-modal");
+  if (modal) return modal;
 
+  modal = document.createElement("div");
+  modal.id = "tables-modal";
+  modal.className = "fixed inset-0 z-[1000] hidden";
+  modal.innerHTML = `
+    <div class="absolute inset-0 bg-black/40" data-overlay="true"></div>
+    <div class="relative w-full h-full flex items-start md:items-center justify-center p-4 md:p-6">
+      <div class="w-full max-w-3xl bg-white rounded-2xl shadow-2xl overflow-hidden">
+        <div class="flex items-center justify-between px-6 py-4 border-b">
+          <h3 class="text-lg font-semibold">Seleccionar Mesas</h3>
+          <button id="close-tables-modal" class="text-gray-500 hover:text-gray-700" type="button">
+            <i class="fa-solid fa-xmark text-xl"></i>
+          </button>
+        </div>
+        <div class="px-6 py-4">
+          <input id="tables-search" class="w-full border rounded-lg px-3 py-2 mb-3" placeholder="Buscar por número o nombre...">
+          <div id="tables-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3"></div>
+        </div>
+        <div class="px-6 py-4 border-t flex justify-end gap-3">
+          <button id="cancel-tables-btn" class="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300" type="button">Cancelar</button>
+          <button id="save-tables-btn" class="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700" type="button">Guardar</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  return modal;
+}
+
+function mesaBtnHTML(m, selected){
+  const id  = m.idMesa ?? m.id ?? m.IdMesa ?? m.Id ?? m.numero;
+  const nro = m.numero ?? m.numeroMesa ?? m.nMesa ?? m.nombre ?? `Mesa ${id}`;
+  const cap = m.capacidad ?? m.sillas ?? m.personas ?? "";
+  return `
+    <button type="button"
+      class="border rounded-lg py-2 px-3 text-sm flex justify-between items-center hover:bg-blue-100 transition ${selected?"mesa-btn-selected":""}"
+      data-mesa="${id}" data-nro="${esc(nro)}">
+      <span>${esc(nro)}${cap?` · ${cap}`:""}</span>
+      <i class="fa-solid fa-check ${selected?"":"opacity-0"}"></i>
+    </button>`;
+}
+
+async function openTablesModal() {
+  const modal = ensureTablesModal();
+  const overlay         = modal.querySelector('[data-overlay="true"]');
+  const closeBtn        = modal.querySelector("#close-tables-modal");
+  const cancelBtn       = modal.querySelector("#cancel-tables-btn");
+  const saveBtn         = modal.querySelector("#save-tables-btn");
+  const tablesGrid      = modal.querySelector("#tables-grid");
+  const tablesSearch    = modal.querySelector("#tables-search");
+
+  // Carga mesas
+  let list = [];
+  try { list = await getMesas(); } catch { list = []; }
+  if (!Array.isArray(list) || !list.length) {
+    list = Array.from({length:12}, (_,i)=>({ idMesa:i+1, numero:i+1, capacidad:4 }));
+  }
+
+  const selected = new Set(mesasSeleccionadas.map(Number));
+  const render = (q="") => {
+    const s=q.trim().toLowerCase();
+    const view = !s ? list : list.filter(m => String(m.numero ?? m.nombre ?? m.idMesa ?? m.id).toLowerCase().includes(s));
+    tablesGrid.innerHTML = view.map(m => mesaBtnHTML(m, selected.has(Number(m.idMesa ?? m.id ?? m.IdMesa ?? m.Id ?? m.numero)))).join("");
+  };
+  render("");
+
+  // Handlers (todos con guardias)
+  tablesGrid.onclick = (ev) => {
+    const btn = ev.target.closest("button[data-mesa]");
+    if (!btn) return;
+    const id = Number(btn.dataset.mesa);
+    const icon = btn.querySelector("i");
+    if (selected.has(id)) { selected.delete(id); btn.classList.remove("mesa-btn-selected"); icon?.classList.add("opacity-0"); }
+    else { selected.add(id); btn.classList.add("mesa-btn-selected"); icon?.classList.remove("opacity-0"); }
+  };
+  if (tablesSearch) {
+    tablesSearch.oninput = () => render(tablesSearch.value);
+  }
+
+  const close = () => modal.classList.add("hidden");
+  overlay?.addEventListener("click", close, { once:true });
+  closeBtn?.addEventListener("click", close, { once:true });
+  cancelBtn?.addEventListener("click", close, { once:true });
+
+  saveBtn?.addEventListener("click", () => {
+    mesasSeleccionadas = Array.from(selected).sort((a,b)=>a-b);
+    selectedTablesText && (selectedTablesText.textContent = mesasSeleccionadas.length
+      ? "Mesas seleccionadas: " + mesasSeleccionadas.join(", ")
+      : "Ninguna mesa seleccionada.");
+    tablesError?.classList.add("hidden");
+    close();
+  }, { once:true });
+
+  modal.classList.remove("hidden");
+}
+
+// ---------- tipos de evento ----------
+async function loadTiposEvento(){
+  if (!eventSelect) return;
   try {
-    if (editingId != null) {
-      await updateReserva(editingId, payload);
-    } else {
-      await createReserva(payload);
+    const tipos = await getTiposReserva();
+    if (Array.isArray(tipos) && tipos.length) {
+      eventSelect.innerHTML = `<option value="">Seleccione...</option>` +
+        tipos.map(t=>{
+          const nom = t.tipo ?? t.nombre ?? t.tipoReserva ?? t.descripcion ?? "—";
+          return `<option value="${esc(nom)}">${esc(nom)}</option>`;
+        }).join("");
+      return;
     }
-    await loadFromAPI();
-    clearForm();
-    closeForm();
-  } catch (err) {
-    console.error("[Guardar] Error:", err);
-    alert("No se pudo guardar. Revisa la consola para más detalle.");
+    throw new Error("Respuesta vacía");
+  } catch (e) {
+    // Fallback visible cuando hay 401/403
+    const fallback = ["Boda","Cumpleaños","Aniversario","Reunión","Otro"];
+    eventSelect.innerHTML = `<option value="">Seleccione...</option>` +
+      fallback.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join("");
+    console.warn("No se pudieron cargar los tipos de evento:", e?.message || e);
   }
 }
 
-// ----------------------- MODAL MESAS -----------------------
-function buildTablesGrid() {
-  if (!tablesGrid) return;
-  tablesGrid.innerHTML = "";
-  for (let i = 1; i <= 12; i++) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.dataset.mesa = String(i);
-    btn.className = "border rounded-lg py-2 flex flex-col items-center text-sm font-medium hover:bg-blue-100 transition";
-    btn.innerHTML = `<i class="fas fa-utensils mb-1"></i> Mesa ${i}`;
-    btn.classList.toggle("mesa-btn-selected", mesasSeleccionadas.includes(i));
+// ---------- eventos UI ----------
+newReservationBtn?.addEventListener("click", ()=>{ clearForm(); setFormModeCreate(); openForm(); });
+cancelReservationBtn?.addEventListener("click", ()=>{ clearForm(); closeForm(); });
+saveReservationBtn?.addEventListener("click", (e)=>{ e.preventDefault(); handleSave(); });
 
-    btn.addEventListener("click", () => {
-      const n = parseInt(btn.dataset.mesa, 10);
-      const isSel = mesasSeleccionadas.includes(n);
-      mesasSeleccionadas = isSel
-        ? mesasSeleccionadas.filter((x) => x !== n)
-        : [...mesasSeleccionadas, n];
-      btn.classList.toggle("mesa-btn-selected", !isSel);
-    });
+selectTablesBtn?.addEventListener("click", (e)=>{ e.preventDefault(); openTablesModal(); });
 
-    tablesGrid.appendChild(btn);
-  }
-}
-selectTablesBtn?.addEventListener("click", () => {
-  buildTablesGrid();
-  tablesModal.classList.remove("hidden");
-});
-closeTablesModal?.addEventListener("click", () => tablesModal.classList.add("hidden"));
-cancelTablesBtn?.addEventListener("click", () => tablesModal.classList.add("hidden"));
-saveTablesBtn?.addEventListener("click", () => {
-  tablesModal.classList.add("hidden");
-  selectedTablesText.textContent = mesasSeleccionadas.length
-    ? "Mesas seleccionadas: " + mesasSeleccionadas.sort((a, b) => a - b).join(", ")
-    : "Ninguna mesa seleccionada.";
-  if (mesasSeleccionadas.length) tablesError.classList.add("hidden");
-});
-
-// ----------------------- MODAL PLATILLOS (demo local) -----------------------
-function buildDishesGrid() {
-  const demo = [
-    { id: 1, nombre: "Ceviche", precio: 5.0 },
-    { id: 2, nombre: "Lomo Saltado", precio: 7.5 },
-    { id: 3, nombre: "Ensalada", precio: 3.0 },
-    { id: 4, nombre: "Jugo", precio: 2.0 },
-  ];
-  dishesGrid.innerHTML = "";
-  demo.forEach((p) => {
-    const isSel = !!platillosSeleccionados.find((d) => (d.id || d.nombre) === (p.id || p.nombre));
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "border rounded-lg py-2 px-3 text-sm flex justify-between items-center hover:bg-green-100 transition";
-    btn.innerHTML = `<span>${escapeHTML(p.nombre)}</span><span>$${p.precio.toFixed(2)}</span>`;
-    btn.classList.toggle("mesa-btn-selected", isSel);
-    btn.addEventListener("click", () => {
-      const idx = platillosSeleccionados.findIndex((d) => (d.id || d.nombre) === (p.id || p.nombre));
-      if (idx >= 0) {
-        platillosSeleccionados.splice(idx, 1);
-        btn.classList.remove("mesa-btn-selected");
-      } else {
-        platillosSeleccionados.push({ ...p, cantidad: 1 });
-        btn.classList.add("mesa-btn-selected");
-      }
-    });
-    dishesGrid.appendChild(btn);
-  });
-}
-selectDishesBtn?.addEventListener("click", () => {
-  buildDishesGrid();
-  dishesModal.classList.remove("hidden");
-});
-closeDishesModal?.addEventListener("click", () => dishesModal.classList.add("hidden"));
-cancelDishesBtn?.addEventListener("click", () => dishesModal.classList.add("hidden"));
-saveDishesBtn?.addEventListener("click", () => {
-  dishesModal.classList.add("hidden");
-  selectedDishesText.textContent =
-    platillosSeleccionados.length
-      ? "Platillos: " + platillosSeleccionados.map((d) => d.nombre).join(", ")
-      : "Ningún platillo seleccionado.";
-  dishesError.classList.add("hidden");
-});
-
-// ----------------------- EVENTOS PRINCIPALES -----------------------
-newReservationBtn?.addEventListener("click", () => {
-  clearForm();
-  setFormModeCreate();
-  openForm();
-});
-cancelReservationBtn?.addEventListener("click", () => {
-  clearForm();
-  closeForm();
-});
-saveReservationBtn?.addEventListener("click", (e) => {
-  e.preventDefault();
-  handleSave();
-});
-
-// ----------------------- INIT -----------------------
-(function init() {
-  // Máscaras: horas, teléfono y tope de personas
-  attachTimeMask(timeStartInput);
-  attachTimeMask(timeEndInput);
-
+// ---------- init ----------
+(function init(){
   clientPhoneInput?.addEventListener("input", () => {
-    let value = clientPhoneInput.value.replace(/[^0-9]/g, "").slice(0, 8);
-    if (value.length > 4) value = value.slice(0, 4) + "-" + value.slice(4);
-    clientPhoneInput.value = value;
+    let v=clientPhoneInput.value.replace(/[^0-9]/g,"").slice(0,8);
+    if (v.length>4) v=v.slice(0,4)+"-"+v.slice(4);
+    clientPhoneInput.value=v;
   });
-
   peopleInput?.addEventListener("input", () => {
-    let v = peopleInput.value.replace(/[^0-9]/g, "");
-    if (v === "") v = "";
-    const num = parseInt(v || "0", 10);
-    if (Number.isFinite(num) && num > 200) v = "200";
-    peopleInput.value = v;
+    let v=peopleInput.value.replace(/[^0-9]/g,"");
+    if (v==="") v="";
+    const n=parseInt(v||"0",10);
+    if (Number.isFinite(n)&&n>200) v="200";
+    peopleInput.value=v;
   });
 
-  loadFromAPI();
+  loadTiposEvento();   // llena combo (o fallback)
+  loadFromAPI();       // lista reservas
 })();

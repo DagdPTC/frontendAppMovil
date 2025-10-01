@@ -1,205 +1,241 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Orderly - Reservas</title>
+
+  <!-- Tailwind (CDN para dev) -->
   <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Iconos -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <!-- Tus estilos -->
   <link rel="stylesheet" href="css/styles.css" />
-  <link rel="stylesheet" href="css/reservations.css">
+  <link rel="stylesheet" href="css/reservations.css" />
+
   <style>
-    .mesa-btn-selected {
-      background-color: #3b82f6;
-      color: white;
-    }
+    /* realce de selección de mesa/platillo compartido */
+    .mesa-btn-selected { background-color:#3b82f6; color:#fff; }
+    /* animación suave de aparición (la usa el form con la clase fadeSlideIn si tu JS la coloca) */
+    @keyframes fadeSlideIn { from{opacity:0; transform:translateY(10px)} to{opacity:1; transform:translateY(0)} }
+    .fadeSlideIn{ animation:fadeSlideIn .25s ease-out both; }
   </style>
 </head>
 
-<body class="bg-gray-50 font-sans">
+<body class="bg-gray-50 text-gray-800 font-sans">
+  <div class="min-h-screen flex flex-col">
 
-  <div
-    class="w-full md:w-full lg:w-full mx-auto min-h-screen bg-white shadow-lg overflow-hidden relative flex flex-col">
+    <!-- Barra superior (sticky) -->
+    <header class="sticky top-0 z-30 bg-blue-500 text-white shadow">
+      <nav class="max-w-6xl mx-auto px-4 py-3">
+        <div class="flex items-center gap-3">
+          <i class="fas fa-calendar-alt text-xl md:text-2xl"></i>
+          <h1 class="text-base md:text-lg font-semibold leading-none">Reservas</h1>
+        </div>
+      </nav>
+    </header>
 
-    <!-- Barra superior -->
-    <nav class="bg-blue-500 text-white p-4 nav-shadow rounded-b-xl">
-      <div class="flex items-center space-x-3">
-        <i class="fas fa-calendar-alt text-2xl"></i>
-        <h1 class="text-lg font-semibold">Reservas</h1>
-      </div>
-    </nav>
+    <!-- Contenido -->
+    <main class="flex-1">
+      <div class="max-w-6xl mx-auto px-4 py-6">
 
-    <main class="p-4 pb-24 flex-1 overflow-y-auto">
-
-      <!-- Botón nueva reserva -->
-      <div id="button-section" class="flex justify-end mb-4">
-        <button id="new-reservation-btn"
-          class="bg-blue-500 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center">
-          <i class="fas fa-plus mr-2"></i>
-          <span>Nueva Reserva</span>
-        </button>
-      </div>
-
-      <!-- Lista de reservas -->
-      <div id="reservations-section" class="space-y-4">
-        <!-- Aquí el JS inyectará las tarjetas -->
-      </div>
-
-
-      <!-- Formulario de nueva reserva -->
-      <div id="new-reservation-form" class="hidden p-4 mt-6 bg-gray-50 border border-gray-200 rounded-lg">
-
-        <div class="flex justify-between items-center mb-4">
-          <h2 class="font-bold text-lg text-gray-800">Nueva Reserva</h2>
-          <button id="cancel-reservation-btn" class="text-blue-500 font-medium">Cancelar</button>
+        <!-- Botón nueva reserva -->
+        <div id="button-section" class="flex justify-end mb-4">
+          <button id="new-reservation-btn"
+                  class="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm">
+            <i class="fas fa-plus"></i><span>Nueva Reserva</span>
+          </button>
         </div>
 
-        <h2 id="reservation-form-title" class="text-xl font-bold text-gray-800 mb-2">Nueva reserva</h2>
+        <!-- Lista de reservas (tu JS inyecta las tarjetas dentro) -->
+        <section id="reservations-section" class="space-y-3">
+          <!-- Ejemplo de tarjeta que tu JS generará:
+          <div class="bg-white border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition">
+            ...
+          </div>
+          -->
+        </section>
 
+        <!-- Formulario (lo muestra/oculta tu JS) -->
+        <section id="new-reservation-form" class="hidden bg-white border border-gray-200 rounded-lg p-4 md:p-5 mt-6">
+          <!-- Encabezado del formulario -->
+          <div class="flex items-center justify-between mb-2">
+            <h2 id="reservation-form-title" class="text-lg md:text-xl font-semibold">Nueva reserva</h2>
+            <button id="cancel-reservation-btn" class="text-blue-600 hover:text-blue-700 text-sm font-medium">
+              Cancelar
+            </button>
+          </div>
 
-        <!-- Cliente -->
-        <label class="block text-sm font-medium text-gray-700 mb-1">Cliente *</label>
-        <input id="client-name" type="text" placeholder="Nombre del Cliente" class="w-full mb-1 p-2 border rounded-lg">
-        <div id="client-error" class="hidden text-red-500 text-xs mb-4">Por favor ingrese un cliente.</div>
+          <!-- Grid de campos -->
+          <div class="grid md:grid-cols-2 gap-4 mt-2">
 
-        <!-- Teléfono -->
-        <label class="block text-sm font-medium text-gray-700 mb-1">Teléfono *</label>
-        <input id="client-phone" type="tel" placeholder="1234-5678" class="w-full mb-1 p-2 border rounded-lg">
-        <div id="phone-error" class="hidden text-red-500 text-xs mb-4">Por favor ingrese un teléfono.</div>
+            <!-- Cliente -->
+            <div class="md:col-span-1">
+              <label for="client-name" class="block text-sm font-medium text-gray-700 mb-1">Cliente *</label>
+              <input id="client-name" type="text" placeholder="Nombre del Cliente"
+                     class="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500" />
+              <p id="client-error" class="hidden text-red-600 text-xs mt-1">Por favor ingrese un cliente.</p>
+            </div>
 
-        <!-- Fecha -->
-        <label class="block text-sm font-medium text-gray-700 mb-1">Fecha *</label>
-        <input id="reservation-date" type="date" class="w-full mb-1 p-2 border rounded-lg">
-        <div id="date-error" class="hidden text-red-500 text-xs mb-4">Por favor ingrese una fecha.</div>
+            <!-- Teléfono -->
+            <div class="md:col-span-1">
+              <label for="client-phone" class="block text-sm font-medium text-gray-700 mb-1">Teléfono *</label>
+              <input id="client-phone" type="tel" placeholder="1234-5678"
+                     class="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500" />
+              <p id="phone-error" class="hidden text-red-600 text-xs mt-1">Por favor ingrese un teléfono.</p>
+            </div>
 
-        <!-- Hora inicio -->
-        <label class="block text-sm font-medium text-gray-700 mb-1">Hora Inicio *</label>
-        <div class="flex gap-2 mb-1">
-          <input id="reservation-time-start" type="number" placeholder="Hora" class="w-full p-2 border rounded-lg">
-          <select id="reservation-time-start-ampm" class="w-24 p-2 border rounded-lg">
-            <option>AM</option>
-            <option>PM</option>
-          </select>
-        </div>
-        <div id="time-start-error" class="hidden text-red-500 text-xs mb-4">Por favor ingrese una hora de inicio.</div>
+            <!-- Fecha -->
+            <div class="md:col-span-1">
+              <label for="reservation-date" class="block text-sm font-medium text-gray-700 mb-1">Fecha *</label>
+              <input id="reservation-date" type="date"
+                     class="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500" />
+              <p id="date-error" class="hidden text-red-600 text-xs mt-1">Por favor ingrese una fecha.</p>
+            </div>
 
-        <!-- Hora fin -->
-        <label class="block text-sm font-medium text-gray-700 mb-1">Hora Fin *</label>
-        <div class="flex gap-2 mb-1">
-          <input id="reservation-time-end" type="number" placeholder="Hora" class="w-full p-2 border rounded-lg">
-          <select id="reservation-time-end-ampm" class="w-24 p-2 border rounded-lg">
-            <option>AM</option>
-            <option>PM</option>
-          </select>
-        </div>
-        <div id="time-end-error" class="hidden text-red-500 text-xs mb-4">Por favor ingrese una hora de fin.</div>
+            <!-- Hora inicio -->
+            <div class="md:col-span-1">
+              <label class="block text-sm font-medium text-gray-700 mb-1">Hora Inicio *</label>
+              <div class="flex gap-2">
+                <input id="reservation-time-start" type="text" inputmode="numeric" placeholder="12:59"
+                       class="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500" />
+                <select id="reservation-time-start-ampm"
+                        class="w-24 p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500">
+                  <option>AM</option><option>PM</option>
+                </select>
+              </div>
+              <p id="time-start-error" class="hidden text-red-600 text-xs mt-1">Por favor ingrese una hora de inicio.</p>
+            </div>
 
-        <!-- Personas -->
-        <label class="block text-sm font-medium text-gray-700 mb-1">Personas *</label>
-        <input id="reservation-people" type="number" placeholder="Cantidad" class="w-full mb-1 p-2 border rounded-lg">
-        <div id="people-error" class="hidden text-red-500 text-xs mb-4">Por favor ingrese la cantidad de personas.</div>
+            <!-- Hora fin -->
+            <div class="md:col-span-1">
+              <label class="block text-sm font-medium text-gray-700 mb-1">Hora Fin *</label>
+              <div class="flex gap-2">
+                <input id="reservation-time-end" type="text" inputmode="numeric" placeholder="12:59"
+                       class="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500" />
+                <select id="reservation-time-end-ampm"
+                        class="w-24 p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500">
+                  <option>AM</option><option>PM</option>
+                </select>
+              </div>
+              <p id="time-end-error" class="hidden text-red-600 text-xs mt-1">Por favor ingrese una hora de fin.</p>
+            </div>
 
-        <!-- Tipo de evento -->
-        <label class="block text-sm font-medium text-gray-700 mb-1">Tipo de Evento *</label>
-        <select id="reservation-event" class="w-full mb-1 p-2 border rounded-lg">
-          <option value="">Seleccione...</option>
-          <option>Boda</option>
-          <option>Cumpleaños</option>
-          <option>Reunión</option>
-          <option>Otro</option>
-        </select>
-        <div id="event-error" class="hidden text-red-500 text-xs mb-4">Por favor seleccione un tipo de evento.</div>
+            <!-- Personas -->
+            <div class="md:col-span-1">
+              <label for="reservation-people" class="block text-sm font-medium text-gray-700 mb-1">Personas *</label>
+              <input id="reservation-people" type="number" min="1" placeholder="Cantidad"
+                     class="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500" />
+              <p id="people-error" class="hidden text-red-600 text-xs mt-1">Por favor ingrese la cantidad de personas.</p>
+            </div>
 
-        <!-- Comentarios -->
-        <label class="block text-sm font-medium text-gray-700 mb-1">Comentarios</label>
-        <textarea id="reservation-comment" placeholder="Escribe algún comentario adicional..."
-          class="w-full mb-4 p-2 border rounded-lg resize-y"></textarea>
+            <!-- Evento -->
+            <div class="md:col-span-1">
+              <label for="reservation-event" class="block text-sm font-medium text-gray-700 mb-1">Tipo de Evento *</label>
+              <select id="reservation-event"
+                      class="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500">
+                <option value="">Seleccione…</option>
+                <option>Boda</option><option>Cumpleaños</option><option>Reunión</option><option>Otro</option>
+              </select>
+              <p id="event-error" class="hidden text-red-600 text-xs mt-1">Por favor seleccione un tipo de evento.</p>
+            </div>
 
-        <!-- BOTÓN DE SELECCIONAR MESAS -->
-        <label class="block text-sm font-medium text-gray-700 mb-1">Mesas *</label>
-        <button type="button" id="select-tables-btn"
-          class="w-full border-2 border-dashed border-gray-300 rounded-lg py-3 mb-1 text-gray-500 hover:border-blue-500 hover:text-blue-500 transition">
-          <i class="fas fa-chair mr-2"></i> Seleccionar Mesas
-        </button>
-        <div id="selected-tables-text" class="text-sm text-gray-600 mb-2"></div>
-        <div id="tables-error" class="hidden text-red-500 text-xs mb-4">Por favor seleccione las mesas.</div>
-        <!-- BOTÓN DE SELECCIONAR PLATILLOS -->
-        <label class="block text-sm font-medium text-gray-700 mb-1">Platillos *</label>
-        <button type="button" id="select-dishes-btn"
-          class="w-full border-2 border-dashed border-gray-300 rounded-lg py-3 mb-1 text-gray-500 hover:border-green-500 hover:text-green-500 transition">
-          <i class="fas fa-utensils mr-2"></i> Agregar Platillos
-        </button>
-        <div id="selected-dishes-text" class="text-sm text-gray-600 mb-2">Ningún platillo seleccionado.</div>
-        <div id="dishes-error" class="hidden text-red-500 text-xs mb-4">Por favor seleccione al menos un platillo.</div>
+            <!-- Comentario -->
+            <div class="md:col-span-2">
+              <label for="reservation-comment" class="block text-sm font-medium text-gray-700 mb-1">Comentarios</label>
+              <textarea id="reservation-comment" rows="3" placeholder="Escribe algún comentario adicional…"
+                        class="w-full p-2.5 border rounded-lg outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 resize-y"></textarea>
+            </div>
 
-        <!-- Botón Guardar -->
-        <button id="save-reservation-btn"
-          class="w-full bg-blue-500 text-white py-3 rounded-lg font-medium hover:bg-blue-600 transition mt-4">
-          Guardar Reserva
-        </button>
+            <!-- Mesas -->
+            <div class="md:col-span-2">
+              <label class="block text-sm font-medium text-gray-700 mb-1">Mesas *</label>
+              <button id="select-tables-btn" type="button"
+                      class="w-full border-2 border-dashed border-gray-300 rounded-lg py-3 text-gray-600 hover:border-blue-500 hover:text-blue-600 transition">
+                <i class="fas fa-chair mr-2"></i>Seleccionar Mesas
+              </button>
+              <p id="selected-tables-text" class="text-sm text-gray-600 mt-1"></p>
+              <p id="tables-error" class="hidden text-red-600 text-xs mt-1">Por favor seleccione las mesas.</p>
+            </div>
 
+            <!-- Platillos -->
+            <div class="md:col-span-2">
+              <label class="block text-sm font-medium text-gray-700 mb-1">Platillos *</label>
+              <button id="select-dishes-btn" type="button"
+                      class="w-full border-2 border-dashed border-gray-300 rounded-lg py-3 text-gray-600 hover:border-green-500 hover:text-green-600 transition">
+                <i class="fas fa-utensils mr-2"></i>Agregar Platillos
+              </button>
+              <p id="selected-dishes-text" class="text-sm text-gray-600 mt-1">Ningún platillo seleccionado.</p>
+              <p id="dishes-error" class="hidden text-red-600 text-xs mt-1">Por favor seleccione al menos un platillo.</p>
+            </div>
+
+          </div>
+
+          <!-- Guardar -->
+          <div class="mt-4">
+            <button id="save-reservation-btn"
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium shadow-sm">
+              Guardar Reserva
+            </button>
+          </div>
+        </section>
       </div>
-
     </main>
 
-    <!-- BARRA INFERIOR TIPO WEB APP -->
-    <nav class="fixed bottom-0 left-0 right-0 w-full bg-white border-t border-gray-200 flex justify-around py-3 px-2">
-      <a href="index.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-        <i class="fas fa-home text-lg mb-1"></i>
-        <span>Inicio</span>
-      </a>
-      <a href="tables.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-        <i class="fas fa-chair text-lg mb-1"></i>
-        <span>Mesas</span>
-      </a>
-      <a href="orders.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-        <i class="fas fa-clipboard-list text-lg mb-1"></i>
-        <span>Pedidos</span>
-      </a>
-      <a href="reservations.html" class="flex flex-col items-center text-xs p-2 active-tab">
-        <i class="fas fa-calendar-alt text-lg mb-1"></i>
-        <span>Reservas</span>
-      </a>
-      <a href="menu.html" class="flex flex-col items-center text-xs p-2 text-gray-500">
-        <i class="fas fa-utensils text-lg mb-1"></i>
-        <span>Menú</span>
-      </a>
+    <!-- Barra inferior -->
+    <nav class="sticky bottom-0 z-20 bg-white border-t border-gray-200">
+      <div class="max-w-6xl mx-auto px-2">
+        <ul class="flex justify-around py-3">
+          <li><a href="index.html" class="flex flex-col items-center text-xs text-gray-500 hover:text-gray-700">
+            <i class="fas fa-home text-lg mb-1"></i><span>Inicio</span></a></li>
+          <li><a href="tables.html" class="flex flex-col items-center text-xs text-gray-500 hover:text-gray-700">
+            <i class="fas fa-chair text-lg mb-1"></i><span>Mesas</span></a></li>
+          <li><a href="orders.html" class="flex flex-col items-center text-xs text-gray-500 hover:text-gray-700">
+            <i class="fas fa-clipboard-list text-lg mb-1"></i><span>Pedidos</span></a></li>
+          <li><a href="reservations.html" class="flex flex-col items-center text-xs text-blue-600">
+            <i class="fas fa-calendar-alt text-lg mb-1"></i><span>Reservas</span></a></li>
+          <li><a href="menu.html" class="flex flex-col items-center text-xs text-gray-500 hover:text-gray-700">
+            <i class="fas fa-utensils text-lg mb-1"></i><span>Menú</span></a></li>
+        </ul>
+      </div>
     </nav>
-
   </div>
 
-  <!-- MODAL SELECCIÓN MESAS -->
-  <div id="tables-modal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 hidden">
-    <div class="bg-white rounded-xl shadow-lg p-4 max-w-xs w-full">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="font-semibold text-gray-800">Seleccionar Mesas</h2>
-        <button id="close-tables-modal" class="text-gray-400 text-xl leading-none">&times;</button>
+  <!-- MODAL Mesas -->
+  <div id="tables-modal" class="fixed inset-0 z-40 hidden">
+    <div class="absolute inset-0 bg-black/40"></div>
+    <div class="relative z-10 max-w-sm mx-auto my-10 bg-white rounded-xl shadow-lg p-4">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-semibold text-gray-800">Seleccionar Mesas</h3>
+        <button id="close-tables-modal" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
       </div>
       <div id="tables-grid" class="grid grid-cols-3 gap-2 mb-4"></div>
-      <div class="flex justify-end space-x-2">
+      <div class="flex justify-end gap-2">
         <button id="cancel-tables-btn" class="px-3 py-1 text-sm border rounded-lg">Cancelar</button>
-        <button id="save-tables-btn" class="px-3 py-1 text-sm bg-blue-500 text-white rounded-lg">Guardar</button>
+        <button id="save-tables-btn" class="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg">Guardar</button>
       </div>
     </div>
   </div>
 
-  <!-- MODAL SELECCIÓN PLATILLOS -->
-  <div id="dishes-modal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 hidden">
-    <div class="bg-white rounded-xl shadow-lg p-4 max-w-md w-full">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="font-semibold text-gray-800">Seleccionar Platillos</h2>
-        <button id="close-dishes-modal" class="text-gray-400 text-xl leading-none">&times;</button>
+  <!-- MODAL Platillos -->
+  <div id="dishes-modal" class="fixed inset-0 z-40 hidden">
+    <div class="absolute inset-0 bg-black/40"></div>
+    <div class="relative z-10 max-w-md mx-auto my-10 bg-white rounded-xl shadow-lg p-4">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="font-semibold text-gray-800">Seleccionar Platillos</h3>
+        <button id="close-dishes-modal" class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
       </div>
       <div id="dishes-grid" class="grid grid-cols-2 gap-2 mb-4"></div>
-      <div class="flex justify-end space-x-2">
+      <div class="flex justify-end gap-2">
         <button id="cancel-dishes-btn" class="px-3 py-1 text-sm border rounded-lg">Cancelar</button>
-        <button id="save-dishes-btn" class="px-3 py-1 text-sm bg-green-500 text-white rounded-lg">Guardar</button>
+        <button id="save-dishes-btn" class="px-3 py-1 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg">Guardar</button>
       </div>
     </div>
   </div>
 
+  <!-- Controlador (asegúrate de que el path/archivo coincida con tu JS real) -->
   <script type="module" src="js/controllers/reservaController.js"></script>
 </body>
-
 </html>
