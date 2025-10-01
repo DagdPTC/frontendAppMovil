@@ -307,7 +307,7 @@ async function renderOfertas() {
 }
 
 // ==========================
-// 👤 SALUDO DINÁMICO
+//  SALUDO DINÁMICO
 // ==========================
 
 // Obtiene el usuario actual desde /api/auth/me
@@ -402,7 +402,7 @@ function pintarDesdeCacheSiDisponible() {
 }
 
 // ==========================
-// 🚪 CERRAR SESIÓN
+//  CERRAR SESIÓN
 // ==========================
 
 // Función para cerrar sesión
@@ -478,7 +478,7 @@ const actualizarTodo = () => {
 };
 
 // ==========================
-// 🚀 INICIALIZACIÓN
+//  INICIALIZACIÓN
 // ==========================
 document.addEventListener('DOMContentLoaded', async () => {
   // Ejecutar reinicio automático al cargar
@@ -494,14 +494,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const me = await fetchUsuarioActual();
     if (me) {
       pintarUsuarioEnUI(me);
-      console.log('✅ Usuario autenticado:', me.username, '- Rol:', me.rol);
+      console.log('Usuario autenticado:', me.username, '- Rol:', me.rol);
     } else {
-      console.warn('⚠️ No se pudo obtener el usuario. Redirigiendo al login...');
+      console.warn('No se pudo obtener el usuario. Redirigiendo al login...');
       window.location.href = 'login.html';
       return;
     }
   } catch (e) {
-    console.warn("❌ Error al obtener /me:", e);
+    console.warn("Error al obtener /me:", e);
     window.location.href = 'login.html';
     return;
   }
