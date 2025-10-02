@@ -1,4 +1,4 @@
-export const API_BASE = "http://localhost:8080";
+export const API_BASE = "https://orderly-api-b53514e40ebd.herokuapp.com/";
 
 export const API = {
   mesa:       `${API_BASE}/apiMesa`,

@@ -1,7 +1,7 @@
 // js/services/ordersService.js
 
 // ===== Config =====
-const API_HOST = "http://localhost:8080";
+const API_HOST = " https://orderly-api-b53514e40ebd.herokuapp.com/";
 
 // Endpoints EXACTOS según tus JSON
 const BASE_P  = `${API_HOST}/apiPedido`;

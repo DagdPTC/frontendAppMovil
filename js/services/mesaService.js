@@ -1,7 +1,7 @@
 // js/services/mesaService.js
 import { API } from "./apiConfig.js";
 
-const API_HOST = "http://localhost:8080"; // usa tu host si es distinto
+const API_HOST = "https://orderly-api-b53514e40ebd.herokuapp.com/"; // usa tu host si es distinto
 
 /** Normaliza posibles nombres de propiedades desde la API */
 function normalizaMesa(raw) {

@@ -6,7 +6,7 @@ import { getMesas, fetchPedidosAll /*, patchEstadoMesa*/ } from "../services/mes
 const $  = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-const API_HOST = "http://localhost:8080";
+const API_HOST = "https://orderly-api-b53514e40ebd.herokuapp.com/";
 const MAX_SIZE = 50;
 const AUTO_REFRESH_MS = 3000;
 

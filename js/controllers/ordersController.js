@@ -473,7 +473,7 @@ async function resolveLoggedInWaiter(){
   }catch{}
 
   // 3) intenta endpoints comunes de "me"
-  const API = "http://localhost:8080";
+  const API = "https://orderly-api-b53514e40ebd.herokuapp.com/";
   const ME_CANDIDATES = [
     "/api/auth/me"
   ];
@@ -952,7 +952,7 @@ async function cargarMesasSelect(opts = {}) {
     "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base bg-white shadow-sm";
   sel.innerHTML = `<option value="" disabled selected>Seleccione una mesa disponible…</option>`;
 
-  const API = "http://localhost:8080";
+  const API = "https://orderly-api-b53514e40ebd.herokuapp.com/";
   const urlMesas = `${API}/apiMesa/getDataMesa?page=0&size=50`;
   const urlEM   = `${API}/apiEstadoMesa/getDataEstadoMesa?page=0&size=50`;
   const urlPed  = `${API}/apiPedido/getDataPedido?page=0&size=50`;
