@@ -2,8 +2,8 @@
 // main.js (COMPLETO con autenticación y logout)
 // ==========================
 
-// ====== Config base ======
-const API_BASE = "http://localhost:8080";
+// ====== Config base - USAR HEROKU EN PRODUCCIÓN ======
+const API_BASE = "https://orderly-api-b53514e40ebd.herokuapp.com";
 
 // Endpoint correcto según tu AuthController
 const ME_ENDPOINT = `${API_BASE}/api/auth/me`;
@@ -17,6 +17,17 @@ function obtenerHeaders() {
   return {
     'Content-Type': 'application/json',
   };
+}
+
+// Manejo global de errores de autenticación
+async function manejarErrorAuth(error, response) {
+  if (response && (response.status === 401 || response.status === 403)) {
+    console.warn('Sesión expirada o no autorizada. Redirigiendo al login...');
+    localStorage.removeItem('orderly_me_cache');
+    window.location.href = 'login.html';
+    return true;
+  }
+  return false;
 }
 
 // Función para reiniciar el sistema si es un nuevo día
@@ -69,6 +80,9 @@ async function obtenerEstadisticasMesas() {
       headers: obtenerHeaders(),
       credentials: "include"
     });
+
+    if (await manejarErrorAuth(null, mesasResponse)) return;
+
     const mesasData = await mesasResponse.json();
 
     const estadosResponse = await fetch(`${API_BASE}/apiEstadoMesa/getDataEstadoMesa`, {
@@ -76,6 +90,9 @@ async function obtenerEstadisticasMesas() {
       headers: obtenerHeaders(),
       credentials: "include"
     });
+
+    if (await manejarErrorAuth(null, estadosResponse)) return;
+
     const estadosData = await estadosResponse.json();
 
     if (mesasResponse.ok && estadosResponse.ok) {
@@ -118,6 +135,9 @@ async function obtenerEstadisticasPedidos() {
       headers: obtenerHeaders(),
       credentials: "include"
     });
+
+    if (await manejarErrorAuth(null, response)) return;
+
     const data = await response.json();
 
     if (response.ok) {
@@ -149,6 +169,9 @@ async function obtenerOfertas() {
       headers: obtenerHeaders(),
       credentials: "include"
     });
+
+    if (await manejarErrorAuth(null, response)) return [];
+
     const data = await response.json();
 
     if (response.ok) {
@@ -321,6 +344,9 @@ async function fetchUsuarioActual() {
     
     if (!res.ok) {
       console.warn(`/me respondió con ${res.status}`);
+      if (res.status === 401 || res.status === 403) {
+        return null;
+      }
       return null;
     }
     
