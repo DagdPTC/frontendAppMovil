@@ -2,7 +2,7 @@
 // FIXED: Endpoints corregidos + manejo robusto de errores
 
 // ===== Config =====
-const API_HOST = " https://orderly-api-b53514e40ebd.herokuapp.com/";
+const API_HOST = " https://orderly-api-b53514e40ebd.herokuapp.com";
 
 const BASE_RESERVA = `${API_HOST}/apiReserva`;
 const BASE_TIPORES = `${API_HOST}/apiTipoReserva`;
