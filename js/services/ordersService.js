@@ -1,7 +1,7 @@
 // js/services/ordersService.js
 
 // ===== Config =====
-const API_HOST = " https://orderly-api-b53514e40ebd.herokuapp.com";
+const API_HOST = "https://orderly-api-b53514e40ebd.herokuapp.com";
 
 // Endpoints EXACTOS según tus JSON
 const BASE_P  = `${API_HOST}/apiPedido`;
@@ -51,10 +51,6 @@ export async function ensureMeInSession(opts = {}) {
     const res = await fetch(`${API_HOST}/api/auth/me`, {
       method: "GET",
       credentials: "include",
-      headers: {
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-      },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -184,6 +180,8 @@ export async function getPedidos(page = 0, size = 50) {
 
 // PÉGALO TAL CUAL, reemplazando tu método actual
 export async function createPedido(body) {
+  
+
   const url = `${API_HOST}/apiPedido/createPedido`;
   console.log("[POST]", url, "payload:", body);
   return fetchJSON(url, { method: "POST", body: JSON.stringify(body) });

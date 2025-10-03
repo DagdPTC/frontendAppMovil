@@ -436,50 +436,50 @@ function showConfirm({ title = "Confirmar", message = "", confirmText = "Aceptar
    Helpers: limpiar / snapshots / locks mesas / API mesa
    ========================= */
 
-async function tryFetchJson(url){
-  try{
+async function tryFetchJson(url) {
+  try {
     const r = await fetch(url, { credentials: "include" });
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json().catch(() => null);
-  }catch(_){ return null; }
+  } catch (_) { return null; }
 }
 
-function getCookie(name){
-  const m = document.cookie.match(new RegExp('(?:^|; )'+name+'=([^;]*)'));
+function getCookie(name) {
+  const m = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-async function resolveLoggedInWaiter(){
+async function resolveLoggedInWaiter() {
   // 1) cache de esta pantalla
-  try{
+  try {
     const cached = JSON.parse(sessionStorage.getItem("ord_waiter") || "null");
-    if(cached && Number(cached.idEmpleado) > 0 && cached.username) return cached;
-  }catch{}
+    if (cached && Number(cached.idEmpleado) > 0 && cached.username) return cached;
+  } catch { }
 
   // 2) cache anterior (si tú lo guardabas)
-  try{
+  try {
     const u = JSON.parse(sessionStorage.getItem("ord_user") || "null");
-    if (u && (u.idEmpleado || (u.empleado && u.empleado.id))){
+    if (u && (u.idEmpleado || (u.empleado && u.empleado.id))) {
       const obj = {
         idEmpleado: Number(u.idEmpleado ?? u.empleado?.id),
         username: String(u.username ?? u.usuario ?? u.user ?? u.nombreUsuario ?? u.nombre ?? `Empleado #${u.idEmpleado}`),
         email: String(u.email ?? u.correo ?? u.mail ?? "")
       };
-      if (Number.isFinite(obj.idEmpleado) && obj.idEmpleado>0) {
+      if (Number.isFinite(obj.idEmpleado) && obj.idEmpleado > 0) {
         sessionStorage.setItem("ord_waiter", JSON.stringify(obj));
         return obj;
       }
     }
-  }catch{}
+  } catch { }
 
   // 3) intenta endpoints comunes de "me"
   const API = "https://orderly-api-b53514e40ebd.herokuapp.com";
   const ME_CANDIDATES = [
     "/api/auth/me"
   ];
-  for (const path of ME_CANDIDATES){
+  for (const path of ME_CANDIDATES) {
     const data = await tryFetchJson(`${API}${path}`);
-    if (data){
+    if (data) {
       const idEmpleado = Number(
         data.idEmpleado ?? data.empleadoId ?? data.idEmpleadoFk ??
         data.id_empleado ?? data.idEmpleadoUsuario ?? data.empleado?.id
@@ -489,7 +489,7 @@ async function resolveLoggedInWaiter(){
       ).trim();
       const email = String(data.email ?? data.correo ?? data.mail ?? data.userEmail ?? "").trim();
 
-      if (Number.isFinite(idEmpleado) && idEmpleado>0 && username){
+      if (Number.isFinite(idEmpleado) && idEmpleado > 0 && username) {
         const obj = { idEmpleado, username, email };
         sessionStorage.setItem("ord_waiter", JSON.stringify(obj));
         return obj;
@@ -501,24 +501,24 @@ async function resolveLoggedInWaiter(){
 
   // 4) intenta extraer email desde cookie JWT (si existe)
   let email = (typeof meEmail !== "undefined") ? meEmail : "";
-  if (!email){
+  if (!email) {
     const token = getCookie("jwt") || getCookie("token") || getCookie("access_token") || getCookie("Authorization");
     const payload = token ? tryDecodeJwt(token) : null;
     email = String(payload?.email ?? payload?.sub ?? payload?.user_email ?? "").trim();
   }
 
   // 5) si tenemos email, buscamos el usuario para sacar idEmpleado/username
-  if (email){
+  if (email) {
     const users = await tryFetchJson(`${API}/apiUsuario/getDataUsuario?page=0&size=1000`);
     const list = Array.isArray(users?.content) ? users.content : (Array.isArray(users) ? users : []);
     const u = list.find(x => {
       const mail = String(x.email ?? x.correo ?? x.mail ?? "").trim().toLowerCase();
       return mail && mail === email.toLowerCase();
     });
-    if (u){
+    if (u) {
       const idEmpleado = Number(u.idEmpleado ?? u.empleadoId ?? u.id_empleado ?? u.empleado?.id);
-      const username  = String(u.username ?? u.usuario ?? u.user ?? u.nombreUsuario ?? u.nombre ?? "").trim();
-      if (Number.isFinite(idEmpleado) && idEmpleado>0 && username){
+      const username = String(u.username ?? u.usuario ?? u.user ?? u.nombreUsuario ?? u.nombre ?? "").trim();
+      if (Number.isFinite(idEmpleado) && idEmpleado > 0 && username) {
         const obj = { idEmpleado, username, email };
         sessionStorage.setItem("ord_waiter", JSON.stringify(obj));
         return obj;
@@ -541,10 +541,10 @@ function clearSnapshots() {
 /* =========================
    Overlay helpers
    ========================= */
-function openOrderFormOverlay(){
+function openOrderFormOverlay() {
   ensureOrderOverlayStyles();
   let overlay = document.getElementById("order-overlay");
-  if (!overlay){
+  if (!overlay) {
     overlay = document.createElement("div");
     overlay.id = "order-overlay";
     overlay.innerHTML = `<div id="order-sheet"></div>`;
@@ -555,7 +555,7 @@ function openOrderFormOverlay(){
   if (!form || !sheet) return;
 
   // Guardamos el padre original para poder devolverlo
-  if (!form._homeParent){
+  if (!form._homeParent) {
     form._homeParent = form.parentElement;
     form._homeNext = form.nextSibling; // para insertar en su posición original
   }
@@ -567,11 +567,11 @@ function openOrderFormOverlay(){
   form.querySelector("input, select, textarea, button")?.focus?.();
 }
 
-function closeOrderFormOverlay(){
+function closeOrderFormOverlay() {
   const overlay = document.getElementById("order-overlay");
   const form = document.getElementById("new-order-form");
-  if (overlay && form && form._homeParent){
-    if (form._homeNext && form._homeNext.parentNode === form._homeParent){
+  if (overlay && form && form._homeParent) {
+    if (form._homeNext && form._homeNext.parentNode === form._homeParent) {
       form._homeParent.insertBefore(form, form._homeNext);
     } else {
       form._homeParent.appendChild(form);
@@ -583,7 +583,7 @@ function closeOrderFormOverlay(){
 /* =========================
    Recargar pedidos + relayout masonry
    ========================= */
-async function reloadOrdersList(){
+async function reloadOrdersList() {
   const container = document.getElementById("orders-list");
   if (!container) return;
 
@@ -697,7 +697,6 @@ function accentForEstado(nombre) {
   if (n.includes("pend")) return "#F59E0B"; // amber
   if (n.includes("prep") || n.includes("proces")) return "#3B82F6"; // blue
   if (n.includes("entreg")) return "#10B981"; // emerald
-  if (n.includes("pag")) return "#16A34A"; // green
   if (n.includes("cancel") || n.includes("anul")) return "#EF4444"; // red
   return "#6B7280"; // gray
 }
@@ -738,7 +737,7 @@ function unlockMesaLocal(idMesa) {
 window.isMesaLockedByOrder = (idMesa) => getLockedSet().has(String(idMesa));
 
 // ---- API Mesa (best-effort; ajusta si tu backend difiere) ----
-const API_HOST = "http://localhost:8080";
+const API_HOST = "https://orderly-api-b53514e40ebd.herokuapp.com";
 async function tryUpdateMesaEstado(idMesa, idEstadoMesa) {
   const url = `${API_HOST}/apiMesa/estado/${idMesa}/${idEstadoMesa}`;
   const res = await fetch(url, { method: "PATCH", credentials: "include" });
@@ -954,14 +953,14 @@ async function cargarMesasSelect(opts = {}) {
 
   const API = "https://orderly-api-b53514e40ebd.herokuapp.com";
   const urlMesas = `${API}/apiMesa/getDataMesa?page=0&size=50`;
-  const urlEM   = `${API}/apiEstadoMesa/getDataEstadoMesa?page=0&size=50`;
-  const urlPed  = `${API}/apiPedido/getDataPedido?page=0&size=50`;
-  const urlEP   = `${API}/apiEstadoPedido/getDataEstadoPedido?page=0&size=50`;
+  const urlEM = `${API}/apiEstadoMesa/getDataEstadoMesa?page=0&size=50`;
+  const urlPed = `${API}/apiPedido/getDataPedido?page=0&size=50`;
+  const urlEP = `${API}/apiEstadoPedido/getDataEstadoPedido?page=0&size=50`;
 
-  const getId        = (o) => Number(o.id ?? o.Id ?? o.idEstadoMesa ?? o.IdEstadoMesa);
-  const nomMesa      = (m) => String(m.nomMesa ?? `Mesa ${getId(m)}`);
-  const idEstMesa    = (m) => Number(m.idEstadoMesa ?? m.IdEstadoMesa);
-  const nomEstadoM   = (e) => String(
+  const getId = (o) => Number(o.id ?? o.Id ?? o.idEstadoMesa ?? o.IdEstadoMesa);
+  const nomMesa = (m) => String(m.nomMesa ?? `Mesa ${getId(m)}`);
+  const idEstMesa = (m) => Number(m.idEstadoMesa ?? m.IdEstadoMesa);
+  const nomEstadoM = (e) => String(
     e.EstadoMesa ?? e.estadoMesa ?? e.nombre ?? e.nomEstado ?? e.estado ?? e.NOMBREESTADO ?? ""
   ).trim();
   const nomEstadoPed = (e) => String(e.nomEstado ?? e.nombre ?? e.estado ?? "").trim();
@@ -1012,7 +1011,7 @@ async function cargarMesasSelect(opts = {}) {
   }
 
   const MAP_ID_ESTADO_MESA_NOMBRE = new Map(estadosMesa.map(e => [getId(e), nomEstadoM(e)]));
-  const MAP_ID_ESTADO_PED_NOMBRE  = new Map(estadosPed.map(e => [getId(e), nomEstadoPed(e)]));
+  const MAP_ID_ESTADO_PED_NOMBRE = new Map(estadosPed.map(e => [getId(e), nomEstadoPed(e)]));
 
   // Encontrar "Disponible" por nombre — robusto
   let idDisponible = null;
@@ -1030,9 +1029,8 @@ async function cargarMesasSelect(opts = {}) {
     return (
       s.includes("final") ||
       s.includes("cancel") ||
-      s.includes("anul")   ||
-      s.includes("rechaz") ||
-      s.includes("pag")    // ← Pagado
+      s.includes("anul") ||
+      s.includes("rechaz")
     );
   };
 
@@ -1047,15 +1045,15 @@ async function cargarMesasSelect(opts = {}) {
 
   sel.innerHTML = `<option value="" disabled selected>Seleccione una mesa disponible…</option>`;
   for (const m of mesas) {
-    const id     = getId(m);
+    const id = getId(m);
     const nombre = nomMesa(m);
-    const idEst  = idEstMesa(m);
+    const idEst = idEstMesa(m);
     const nomEst = MAP_ID_ESTADO_MESA_NOMBRE.get(idEst) || "Desconocido";
 
     // si hay pedido activo sobre esa mesa, fuerza "Ocupada"
     const estadoEfectivo = mesasConPedidoActivo.has(id) ? "Ocupada" : nomEst;
     let habilitada = (idDisponible != null) && (idEst === idDisponible) && !mesasConPedidoActivo.has(id);
-    let etiqueta   = `${nombre} — ${Cap(estadoEfectivo)}`;
+    let etiqueta = `${nombre} — ${Cap(estadoEfectivo)}`;
 
     if (allowCurrentId && Number(allowCurrentId) === id && !habilitada) {
       // al editar, permitir la mesa original aunque esté bloqueada
@@ -1090,8 +1088,8 @@ function fromApi(p) {
   // Tomar la fecha/hora de INICIO priorizando horaInicio
   const fecha = (
     p.horaInicio ?? p.HoraInicio ??
-    p.fpedido   ?? p.FPedido   ??
-    p.fechaPedido ?? p.fecha   ?? ""
+    p.fpedido ?? p.FPedido ??
+    p.fechaPedido ?? p.fecha ?? ""
   ).toString();
 
   // FIN si viene del backend
@@ -1376,21 +1374,21 @@ function renderOrdersList(container, onAddCard) {
 
 // --- helpers mínimos para resolver el usuario logueado --- //
 
-function tryDecodeJwt(token){
-  try{
+function tryDecodeJwt(token) {
+  try {
     const p = token.split('.')[1];
-    const s = atob(p.replace(/-/g,'+').replace(/_/g,'/'));
+    const s = atob(p.replace(/-/g, '+').replace(/_/g, '/'));
     return JSON.parse(s);
-  }catch(_){ return null; }
+  } catch (_) { return null; }
 }
 
-function findJwtPayloadFromCookies(){
+function findJwtPayloadFromCookies() {
   // busca cualquier cookie con pinta de JWT (con dos puntos)
   const parts = document.cookie.split(';').map(s => s.trim());
-  for (const kv of parts){
+  for (const kv of parts) {
     const val = kv.split('=').slice(1).join('=');
     if (!val) continue;
-    if (val.split('.').length === 3){
+    if (val.split('.').length === 3) {
       const payload = tryDecodeJwt(val);
       if (payload) return payload;
     }
@@ -1401,37 +1399,37 @@ function findJwtPayloadFromCookies(){
 }
 
 /** Devuelve { idEmpleado, username, email } o null */
-async function resolveLoggedInWaiterStrict(){
+async function resolveLoggedInWaiterStrict() {
   // cache local de esta pantalla
-  try{
+  try {
     const c = JSON.parse(sessionStorage.getItem("ord_waiter") || "null");
     if (c && Number(c.idEmpleado) > 0 && c.username) return c;
-  }catch{}
+  } catch { }
 
   // muchos setups guardan algo tipo "ord_user" al loguear
-  try{
+  try {
     const u = JSON.parse(sessionStorage.getItem("ord_user") || "null");
-    if (u){
+    if (u) {
       const idEmpleado = Number(u.idEmpleado ?? u.empleado?.id ?? u.empleadoId ?? u.id_empleado);
       const username = String(u.username ?? u.usuario ?? u.user ?? u.nombreUsuario ?? u.nombre ?? "").trim();
       const email = String(u.email ?? u.correo ?? "").trim();
-      if (Number.isFinite(idEmpleado) && idEmpleado>0 && username){
+      if (Number.isFinite(idEmpleado) && idEmpleado > 0 && username) {
         const obj = { idEmpleado, username, email };
         sessionStorage.setItem("ord_waiter", JSON.stringify(obj));
         return obj;
       }
     }
-  }catch{}
+  } catch { }
 
   // intenta extraer del JWT
   const payload = findJwtPayloadFromCookies();
-  if (payload){
+  if (payload) {
     const email = String(payload.email ?? payload.correo ?? payload.sub ?? "").trim();
     const username = String(payload.username ?? payload.usuario ?? payload.name ?? payload.nickname ?? "").trim();
     const idEmpleado = Number(
       payload.idEmpleado ?? payload.empleadoId ?? payload.id_empleado ?? payload.idEmpleadoUsuario
     );
-    if (Number.isFinite(idEmpleado) && idEmpleado>0 && username){
+    if (Number.isFinite(idEmpleado) && idEmpleado > 0 && username) {
       const obj = { idEmpleado, username, email };
       sessionStorage.setItem("ord_waiter", JSON.stringify(obj));
       return obj;
@@ -1444,14 +1442,14 @@ async function resolveLoggedInWaiterStrict(){
 
 
 
-function computeColCount(container){
+function computeColCount(container) {
   // Calcula cuántas columnas caben según --card-min
   const styles = getComputedStyle(container);
   const minRaw = styles.getPropertyValue('--card-min').trim();
   let min;
   if (minRaw.endsWith('%')) {
     // 100% => 1 columna
-    min = container.clientWidth; 
+    min = container.clientWidth;
   } else {
     min = parseInt(minRaw) || 300;
   }
@@ -1460,7 +1458,7 @@ function computeColCount(container){
 }
 
 
-function layoutMasonryColumns(container, items, onAddCard){
+function layoutMasonryColumns(container, items, onAddCard) {
   container.innerHTML = "";
   container.classList.add("orders-masonry");
 
@@ -1470,7 +1468,7 @@ function layoutMasonryColumns(container, items, onAddCard){
   const cols = [];
   const heights = [];
 
-  for (let i = 0; i < colsCount; i++){
+  for (let i = 0; i < colsCount; i++) {
     const c = document.createElement("div");
     c.className = "m-col";
     container.appendChild(c);
@@ -1480,7 +1478,7 @@ function layoutMasonryColumns(container, items, onAddCard){
 
   items.forEach((pedido) => {
     let idxMin = 0;
-    for (let i = 1; i < cols.length; i++){
+    for (let i = 1; i < cols.length; i++) {
       if (heights[i] < heights[idxMin]) idxMin = i;
     }
     const col = cols[idxMin];
@@ -1490,7 +1488,7 @@ function layoutMasonryColumns(container, items, onAddCard){
     heights[idxMin] += Math.max(0, after - before);
   });
 
-  requestAnimationFrame(() => { 
+  requestAnimationFrame(() => {
     typeof recalcExpandedHeights === "function" && recalcExpandedHeights();
   });
 }
@@ -1500,7 +1498,7 @@ function layoutMasonryColumns(container, items, onAddCard){
 
 
 
-function ensureMasonryResizeHandler(container){
+function ensureMasonryResizeHandler(container) {
   if (container._masonryResizeAttached) return;
   container._masonryResizeAttached = true;
 
@@ -1508,7 +1506,7 @@ function ensureMasonryResizeHandler(container){
     if (!container._masonryData) return;
     const prevCols = parseInt(getComputedStyle(container).getPropertyValue('--col-count')) || 1;
     const nextCols = computeColCount(container);
-    if (prevCols !== nextCols){
+    if (prevCols !== nextCols) {
       layoutMasonryColumns(container, container._masonryData.items, container._masonryData.onAddCard);
     }
   }, 180);
@@ -1546,7 +1544,6 @@ function badgeColorForEstado(nombre) {
   if (n.includes("pend")) return "bg-yellow-100 text-yellow-800 ring-yellow-200";
   if (n.includes("prep") || n.includes("proces")) return "bg-blue-100 text-blue-800 ring-blue-200";
   if (n.includes("entreg")) return "bg-emerald-100 text-emerald-800 ring-emerald-200";
-  if (n.includes("pag")) return "bg-green-100 text-green-800 ring-green-200";
   if (n.includes("cancel") || n.includes("anul")) return "bg-red-100 text-red-800 ring-red-200";
   return "bg-gray-100 text-gray-700 ring-gray-200";
 }
@@ -1642,7 +1639,7 @@ function badgeColorForEstado(nombre) {
 /* =========================
    Overlay para el formulario (estilos)
    ========================= */
-function ensureOrderOverlayStyles(){
+function ensureOrderOverlayStyles() {
   if (document.getElementById("order-overlay-styles")) return;
   const st = document.createElement("style");
   st.id = "order-overlay-styles";
@@ -1674,7 +1671,7 @@ function agregarTarjetaPedido(pedido, container) {
 
   const esCerrado = (id, nombre) => {
     const n = (nombre || "").toLowerCase();
-    return [4,5,6].includes(Number(id)) || n.includes("final") || n.includes("pag") || n.includes("cancel") || n.includes("anul");
+    return [4, 5, 6].includes(Number(id)) || n.includes("final") || n.includes("pag") || n.includes("cancel") || n.includes("anul");
   };
 
   const card = document.createElement("article");
@@ -2202,9 +2199,10 @@ function buildPayloadsFromSelection() {
     totalPedido: Number(total.toFixed(2)),
     subtotal: Number(subtotal.toFixed(2)),
     propina: Number(propina.toFixed(2)),
-    FPedido: FPedidoISO,           // ← nombre más probable en tu DTO
-    fpedido: FPedidoISO,           // ← alias por si el DTO está en minúsculas
-    fechaPedido: FPedidoISO,       // ← alias común
+    FPedido: FPedidoISO,           
+    fpedido: FPedidoISO,           
+    fechaPedido: FPedidoISO,
+    horaInicio: FPedidoISO,       
     items,
     nombreCliente,
     observaciones,
@@ -2227,10 +2225,15 @@ async function crearPedidoDesdeSeleccion() {
   const idEstado = Number(body.idEstadoPedido || 0);
 
   if (idMesa) {
-    if (idEstado === 4 || idEstado === 5 || idEstado === 6) {
-      await liberarMesa(idMesa);         // Pagado/Cancelado/Finalizado → Disponible
-    } else if (idEstado === 1 || idEstado === 2 || idEstado === 3) {
-      await ocuparMesa(idMesa);          // Pendiente/Preparación/Entregado → Ocupada
+    const nombreEstado = (MAP_ESTADOS.get(Number(idEstado))?.nombre || "").toLowerCase();
+    const cerrado = nombreEstado.includes("final") ||
+      nombreEstado.includes("cancel") ||
+      nombreEstado.includes("anul") ||
+      nombreEstado.includes("rechaz");
+    if (cerrado) {
+      await liberarMesa(idMesa);
+    } else {
+      await ocuparMesa(idMesa);
     }
   }
 }
@@ -2238,31 +2241,36 @@ async function crearPedidoDesdeSeleccion() {
 
 async function actualizarPedido(editId) {
   if (!Number.isFinite(editId)) throw new Error("ID inválido para actualizar.");
-  const body = buildPayloadsFromSelection();
 
+  const body = buildPayloadsFromSelection(); // trae idMesa, idEstadoPedido, items, etc.
   await updatePedido(editId, body);
 
-  const nuevaMesaId = Number(body.idMesa || 0);
   const mesaAntes   = Number(editingOriginalMesaId || 0);
-  const idEstado    = Number(body.idEstadoPedido || 0);
+  const nuevaMesaId = Number(body.idMesa || 0);
+  const nombreEstado = (MAP_ESTADOS.get(Number(body.idEstadoPedido))?.nombre || "").toLowerCase();
+  const cerrado = nombreEstado.includes("final")
+               || nombreEstado.includes("cancel")
+               || nombreEstado.includes("anul")
+               || nombreEstado.includes("rechaz");
 
   // Si cambió de mesa, liberar la anterior
   if (mesaAntes && nuevaMesaId && mesaAntes !== nuevaMesaId) {
-    try { await liberarMesa(mesaAntes); } catch { /* noop */ }
+    try { await liberarMesa(mesaAntes); } catch {}
   }
 
-  // Regla según estado (incluye Pagado=4)
-  if (idEstado === 4 || idEstado === 5 || idEstado === 6) {
-    if (nuevaMesaId) { try { await liberarMesa(nuevaMesaId); } catch {} }
-  } else if (idEstado === 1 || idEstado === 2 || idEstado === 3) {
-    if (nuevaMesaId) { try { await ocuparMesa(nuevaMesaId); } catch {} }
+  // Regla de ocupada/libre según estado (sin IDs mágicos)
+  if (nuevaMesaId) {
+    if (cerrado) { try { await liberarMesa(nuevaMesaId); } catch {} }
+    else         { try { await ocuparMesa(nuevaMesaId);  } catch {} }
   }
 
+  // Limpieza de estado de edición
   editingOriginalMesaId = null;
   editingOriginalPlatillos = new Set();
   editingOriginalLinesByPlatillo = new Map();
   editingMaxIdDetalle = 0;
 }
+
 
 /* =========================
    LOADER GLOBAL (overlay con mensajes)
