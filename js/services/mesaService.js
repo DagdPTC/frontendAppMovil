@@ -1,7 +1,7 @@
 // js/services/mesaService.js
 import { API } from "./apiConfig.js";
 
-const API_HOST = "https://orderly-api-b53514e40ebd.herokuapp.com/"; // usa tu host si es distinto
+const API_HOST = "https://orderly-api-b53514e40ebd.herokuapp.com"; // usa tu host si es distinto
 
 /** Normaliza posibles nombres de propiedades desde la API */
 function normalizaMesa(raw) {
@@ -89,7 +89,7 @@ export async function getMesas(page = 0, size = 50) {
 /** GET: estados de mesa (normalizados) */
 // Estados de mesa (robusto a distintos nombres de propiedades)
 export async function getEstadosMesa(page = 0, size = 50) {
-  const url = `http://localhost:8080/apiEstadoMesa/getDataEstadoMesa?page=${encodeURIComponent(page)}&size=${encodeURIComponent(size)}`;
+  const url = `https://orderly-api-b53514e40ebd.herokuapp.com/apiEstadoMesa/getDataEstadoMesa?page=${encodeURIComponent(page)}&size=${encodeURIComponent(size)}`;
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) {
     console.warn("[EstadosMesa] backend respondió", res.status, res.statusText, "→ usar fallback");

@@ -1,12 +1,12 @@
 // js/controllers/mesaController.js
 // Reemplaza COMPLETO este archivo
 
-import { getMesas, fetchPedidosAll /*, patchEstadoMesa*/ } from "../services/mesaService.js"; // usamos nuestra llamada directa
+import { getMesas, fetchPedidosAll } from "../services/mesaService.js";
 
-const $  = (s, r = document) => r.querySelector(s);
+const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-const API_HOST = "https://orderly-api-b53514e40ebd.herokuapp.com/";
+const API_HOST = "https://orderly-api-b53514e40ebd.herokuapp.com";
 const MAX_SIZE = 50;
 const AUTO_REFRESH_MS = 3000;
 
@@ -19,8 +19,8 @@ const norm = (s) => String(s ?? "")
 
 function pickArrayPayload(data) {
   if (Array.isArray(data?.content)) return data.content;
-  if (Array.isArray(data?.data))    return data.data;
-  if (Array.isArray(data))          return data;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data)) return data;
   if (Array.isArray(data?.data?.content)) return data.data.content;
   return [];
 }
@@ -29,6 +29,54 @@ async function fetchArray(url) {
   if (!res.ok) return [];
   const data = await res.json().catch(() => ({}));
   return pickArrayPayload(data);
+}
+
+/* =============== Busy Overlay (spinner + blur) =============== */
+let BUSY_COUNT = 0;
+let BUSY_TIMER = null;
+
+function ensureBusy() {
+  let el = $("#busy-overlay");
+  if (el) return el;
+
+  el = document.createElement("div");
+  el.id = "busy-overlay";
+  el.className = "fixed inset-0 z-[100] hidden items-center justify-center";
+  el.innerHTML = `
+    <div class="absolute inset-0 bg-black/30 backdrop-blur-[2px]"></div>
+    <div class="relative bg-white rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3">
+      <span class="inline-block w-4 h-4 rounded-full border-2 border-gray-300 border-t-blue-500 animate-spin"></span>
+      <span id="busy-msg" class="text-sm text-gray-700">Cargando…</span>
+    </div>
+  `;
+  el.style.display = "none";
+  el.style.alignItems = "center";
+  el.style.justifyContent = "center";
+  document.body.appendChild(el);
+  return el;
+}
+function showBusy(msg = "Cargando…", { delay = 160 } = {}) {
+  const host = ensureBusy();
+  const label = host.querySelector("#busy-msg");
+  if (label) label.textContent = msg;
+
+  BUSY_COUNT++;
+  if (BUSY_COUNT === 1) {
+    clearTimeout(BUSY_TIMER);
+    BUSY_TIMER = setTimeout(() => {
+      host.classList.remove("hidden");
+      host.style.display = "flex";
+    }, delay);
+  }
+}
+function hideBusy() {
+  if (BUSY_COUNT > 0) BUSY_COUNT--;
+  if (BUSY_COUNT === 0) {
+    clearTimeout(BUSY_TIMER);
+    const host = ensureBusy();
+    host.classList.add("hidden");
+    host.style.display = "none";
+  }
 }
 
 /* =============== Estados mesa (catálogo) =============== */
@@ -47,9 +95,8 @@ async function fetchEstadosMesa() {
     const content = pickArrayPayload(data);
 
     for (const e of content) {
-      // DTO: { Id, EstadoMesa, ColorEstadoMesa }
-      const id = Number(e.Id ?? e.id);
-      const nombre = String(e.EstadoMesa ?? e.estadoMesa ?? "").trim();
+      const id = Number(e.Id ?? e.id ?? e.idEstadoMesa);
+      const nombre = String(e.EstadoMesa ?? e.estadoMesa ?? e.nombre ?? "").trim();
       if (Number.isFinite(id) && nombre) out.push({ id, nombre });
     }
 
@@ -62,61 +109,54 @@ async function fetchEstadosMesa() {
   const uniq = [...new Map(out.map(x => [x.id, x])).values()];
   return uniq.length ? uniq : [{ id: 1, nombre: "Disponible" }, { id: 2, nombre: "Ocupada" }];
 }
+function filtraEstadosParaEdicion(estados) {
+  return (estados || []).filter(e => {
+    const n = norm(e.nombre);
+    return n.includes("dispon") || n.includes("limp") || n.includes("fuera");
+  });
+}
 
-/* =============== Patch directo a la API (ruta real del backend) =============== */
-// MesaController.java → @PatchMapping("/estado/{id}/{estadoId}")
+/* =============== API PATCH real =============== */
 async function updateMesaEstadoApi(idMesa, idEstado) {
   const url = `${API_HOST}/apiMesa/estado/${encodeURIComponent(idMesa)}/${encodeURIComponent(idEstado)}`;
   const res = await fetch(url, {
     method: "PATCH",
     credentials: "include",
-    headers: { Accept: "application/json" }, // sin body
+    headers: { Accept: "application/json" },
   });
   if (!res.ok) {
-    const txt = await res.text().catch(()=> "");
+    const txt = await res.text().catch(() => "");
     throw new Error(txt || `PATCH ${url} → ${res.status}`);
   }
-  // puede devolver el DTO. No lo necesitamos, pero lo parseamos por si acaso
-  let data = null;
-  try { data = await res.json(); } catch {}
-  return data;
+  try { return await res.json(); } catch { return null; }
 }
 
-/* =============== Estados visuales =============== */
+/* =============== Badges =============== */
 const BADGE = {
   disponible: "bg-emerald-100 text-emerald-800",
-  ocupada:    "bg-red-100 text-red-800",
-  reservada:  "bg-amber-100 text-amber-800",
-  limpieza:   "bg-sky-100 text-sky-800",
-  fuera:      "bg-gray-200 text-gray-800",
-  desconocido:"bg-gray-100 text-gray-700",
+  ocupada: "bg-red-100 text-red-800",
+  reservada: "bg-amber-100 text-amber-800",
+  limpieza: "bg-sky-100 text-sky-800",
+  fuera: "bg-gray-200 text-gray-800",
+  desconocido: "bg-gray-100 text-gray-700",
 };
 function badgeClass(estado) {
   const key = norm(estado);
   if (key.includes("dispon")) return BADGE.disponible;
-  if (key.includes("ocup"))   return BADGE.ocupada;
+  if (key.includes("ocup")) return BADGE.ocupada;
   if (key.includes("reserv")) return BADGE.reservada;
-  if (key.includes("limp"))   return BADGE.limpieza;
-  if (key.includes("fuera"))  return BADGE.fuera;
+  if (key.includes("limp")) return BADGE.limpieza;
+  if (key.includes("fuera")) return BADGE.fuera;
   return BADGE.desconocido;
 }
 
-/* =============== Lógica de negocio (según pedido) =============== */
-/**
- * Pedido activo → mesa OCUPADA (EstadoMesaId 2)
- *   - IdEstadoPedido: 1 (Pendiente), 2 (En preparación), 3 (Entregado)
- * Pedido final → mesa DISPONIBLE (EstadoMesaId 1)
- *   - IdEstadoPedido: 5 (Cancelado), 6 (Finalizado)
- *   - (Pagado 4 NO lo pediste, así que no lo toco)
- * Estados "Limpieza" y "Fuera de uso" se manipulan manualmente (NO se tocan aquí).
- */
+/* =============== Reglas de pedidos =============== */
 const PEDIDO_ACTIVO_IDS = new Set([1, 2, 3]);
-const PEDIDO_FINAL_IDS  = new Set([5, 6]);
+const PEDIDO_FINAL_IDS = new Set([5, 6]);
 const PEDIDO_ACTIVO_NOMS = new Set(["pendiente", "en preparacion", "en preparación", "entregado"]);
-const PEDIDO_FINAL_NOMS  = new Set(["cancelado", "finalizado"]);
+const PEDIDO_FINAL_NOMS = new Set(["cancelado", "finalizado"]);
 
 function extractMesaIdFromPedido(p) {
-  // DTO: { IdMesa, IdEstadoPedido, ... }
   const id = Number(p.IdMesa ?? p.idMesa ?? p.mesaId);
   return Number.isFinite(id) ? id : null;
 }
@@ -125,39 +165,12 @@ function extractEstadoPedidoId(p) {
   return Number.isFinite(id) ? id : null;
 }
 function extractEstadoPedidoNombre(p) {
-  // por si algún serializador adjunta nombre; normalmente el DTO trae solo IDs
   const n = p.EstadoPedido ?? p.estadoPedido ?? p.NombreEstado ?? p.nombreEstado ?? p.estado;
   return n ? String(n) : "";
 }
 
-/* Lee pedidos y decide si hay uno ACTIVO por mesa */
-async function getMesasConPedidoActivoSet() {
-  const pedidos = await fetchArray(`${API_HOST}/apiPedido/getDataPedido?page=0&size=500`);
-  const set = new Set();
-  for (const p of pedidos) {
-    const idMesa = extractMesaIdFromPedido(p);
-    if (!Number.isFinite(idMesa)) continue;
-
-    const id = extractEstadoPedidoId(p);
-    const nom = norm(extractEstadoPedidoNombre(p));
-    let activo = false;
-
-    if (id != null) activo = PEDIDO_ACTIVO_IDS.has(id) || (PEDIDO_FINAL_IDS.has(id) ? false : activo);
-    if (!activo && nom) activo = PEDIDO_ACTIVO_NOMS.has(nom);
-
-    if (activo) set.add(String(idMesa));
-  }
-  return set;
-}
-
-/**
- * Sincroniza en BD:
- *  - Mesa con pedido activo → Ocupada
- *  - Mesa sin pedido activo → Disponible
- *  - NO tocar si la mesa está en Limpieza o Fuera de uso (manual)
- */
-async function syncMesasSegunPedidos(mesas, estados) {
-  // ===== utilidades robustas (planos/anidados) =====
+/* =============== Sync mesas según pedidos =============== */
+async function syncMesasSegunPedidos(mesas, estados, { busy = false } = {}) {
   const N = (s) => String(s ?? "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
   const getMesaId = (p) => {
@@ -198,21 +211,24 @@ async function syncMesasSegunPedidos(mesas, estados) {
     return 0;
   };
 
-  // ===== IDs de estados de mesa (detectados por nombre) =====
   const idDisponible = (estados.find(e => N(e.nombre).includes("dispon"))?.id) ?? 1;
-  const idOcupada    = (estados.find(e => N(e.nombre).includes("ocup"))  ?.id) ?? 2;
-  const estadosById  = new Map(estados.map(e => [e.id, e]));
+  const idOcupada = (estados.find(e => N(e.nombre).includes("ocup"))?.id) ?? 2;
+  const estadosById = new Map(estados.map(e => [e.id, e]));
 
-  // ===== reglas de pedido que definiste =====
-  const PEDIDO_ACTIVO_IDS  = new Set([1, 2, 3]); // pendiente / preparación / entregado
-  const PEDIDO_FINAL_IDS   = new Set([5, 6]);    // cancelado / finalizado
-  const PEDIDO_ACTIVO_NOMS = new Set(["pendiente","en preparacion","en preparación","preparacion","preparación","entregado"]);
-  const PEDIDO_FINAL_NOMS  = new Set(["cancelado","finalizado"]);
+  const PEDIDO_ACTIVO_IDS = new Set([1, 2, 3]);
+  const PEDIDO_FINAL_IDS = new Set([5, 6]);
+  const PEDIDO_ACTIVO_NOMS = new Set(["pendiente", "en preparacion", "en preparación", "preparacion", "preparación", "entregado"]);
+  const PEDIDO_FINAL_NOMS = new Set(["cancelado", "finalizado"]);
 
-  // ===== 1) Traer todos los pedidos (paginado) y quedarnos con el ÚLTIMO por mesa =====
-  const pedidos = await fetchPedidosAll();
-  const ultimoPorMesa = new Map(); // mesaId -> pedido más reciente
+  if (busy) showBusy("Cargando pedidos…");
+  let pedidos;
+  try {
+    pedidos = await fetchPedidosAll();
+  } finally {
+    if (busy) hideBusy();
+  }
 
+  const ultimoPorMesa = new Map();
   for (const p of pedidos) {
     const mesaId = getMesaId(p);
     if (!Number.isFinite(mesaId)) continue;
@@ -224,7 +240,6 @@ async function syncMesasSegunPedidos(mesas, estados) {
     }
   }
 
-  // ===== 2) Decidir target por mesa (sin tocar Limpieza / Fuera de uso) =====
   const updates = [];
 
   for (const m of mesas) {
@@ -232,15 +247,15 @@ async function syncMesasSegunPedidos(mesas, estados) {
     if (!Number.isFinite(mesaId)) continue;
 
     const idEstadoBD = Number(m.IdEstadoMesa ?? m.idEstadoMesa);
-    const nombreBD   = estadosById.get(idEstadoBD)?.nombre || "";
+    const nombreBD = estadosById.get(idEstadoBD)?.nombre || "";
     const sbd = N(nombreBD);
     if (sbd.includes("limpieza") || sbd.includes("fuera de uso")) continue; // manuales
 
     const ped = ultimoPorMesa.get(mesaId);
-    let target = idDisponible; // por defecto, sin pedido → disponible
+    let target = idDisponible;
 
     if (ped) {
-      const idEp  = getEstadoPedidoId(ped);
+      const idEp = getEstadoPedidoId(ped);
       const nomEp = N(getEstadoPedidoNombre(ped));
       let activo = false;
 
@@ -260,7 +275,6 @@ async function syncMesasSegunPedidos(mesas, estados) {
     }
   }
 
-  // ===== 3) PATCH real a la API para escribir en BD =====
   for (const u of updates) {
     try {
       await updateMesaEstadoApi(u.mesaId, u.to);
@@ -272,7 +286,6 @@ async function syncMesasSegunPedidos(mesas, estados) {
   return updates.length > 0;
 }
 
-
 /* =============== Alertas =============== */
 function ensureAlertHost() {
   let host = document.getElementById("alerts-host");
@@ -280,7 +293,7 @@ function ensureAlertHost() {
     host = document.createElement("div");
     host.id = "alerts-host";
     host.setAttribute("aria-live", "polite");
-    host.className = "fixed top-4 right-4 z-50 space-y-3 pointer-events-none";
+    host.className = "fixed top-4 right-4 z-[120] space-y-3 pointer-events-none";
     document.body.appendChild(host);
   }
   return host;
@@ -305,14 +318,24 @@ function showAlert(type = "info", text = "", { timeout = 3500 } = {}) {
   if (timeout) setTimeout(close, timeout);
 }
 
-/* =============== Fancy select =============== */
+/* =============== Fancy select (sticky + “solo uno abierto”) =============== */
+let FS_OPEN_COUNT = 0;
+const FS_INSTANCES = new Set();
+let FS_ID_SEQ = 1;
+
+function closeAllFancyExcept(instance) {
+  FS_INSTANCES.forEach(i => { if (i !== instance) i.close(); });
+}
+
 function upgradeSelect(nativeSelect, opts = {}) {
   if (!nativeSelect || nativeSelect._fancy) return;
-  const multiple    = nativeSelect.hasAttribute("multiple") || !!opts.multiple;
+  const multiple = nativeSelect.hasAttribute("multiple") || !!opts.multiple;
   const placeholder = opts.placeholder || "Estado";
+  const sticky = opts.sticky ?? true;
 
   const wrapper = document.createElement("div");
   wrapper.className = "fancy-select relative w-full";
+  wrapper.dataset.fsId = String(FS_ID_SEQ++);
   nativeSelect.insertAdjacentElement("afterend", wrapper);
 
   nativeSelect.classList.add("sr-only");
@@ -346,13 +369,23 @@ function upgradeSelect(nativeSelect, opts = {}) {
   const panel = document.createElement("div");
   panel.className = [
     "fs-panel absolute left-0 right-0 top-[calc(100%+6px)] z-50",
-    "origin-top rounded-xl border border-gray-200 bg-white shadow-lg p-2",
+    "origin-top rounded-2xl border border-gray-200 bg-white shadow-xl p-2",
     "opacity-0 scale-95 pointer-events-none transition-all"
   ].join(" ");
+  panel._open = false;
+
+  const header = document.createElement("div");
+  header.className = "flex items-center justify-between px-1 pb-2 border-b";
+  header.innerHTML = `
+    <span class="text-sm font-medium text-gray-700">Cambiar estado</span>
+    <button type="button" class="fs-close rounded-lg px-2 py-1 text-sm bg-gray-100 hover:bg-gray-200">Cerrar</button>
+  `;
+  const btnClose = header.querySelector(".fs-close");
 
   const list = document.createElement("div");
-  list.className = "max-h-64 overflow-auto space-y-1";
-  panel.appendChild(list);
+  list.className = "max-h-64 overflow-auto space-y-1 mt-2";
+
+  panel.append(header, list);
   wrapper.appendChild(panel);
 
   const readOptions = () =>
@@ -391,7 +424,7 @@ function upgradeSelect(nativeSelect, opts = {}) {
         nativeSelect.dispatchEvent(new Event("change", { bubbles: true }));
         syncControl();
         renderList();
-        if (!multiple) close();
+        if (!multiple && !sticky) instance.close();
       });
 
       list.appendChild(row);
@@ -417,25 +450,51 @@ function upgradeSelect(nativeSelect, opts = {}) {
     }
   }
 
-  function open()  { panel.classList.remove("pointer-events-none"); panel.style.opacity="1"; panel.style.transform="scale(1)"; caret.style.transform="rotate(180deg)"; }
-  function close() { panel.classList.add("pointer-events-none"); panel.style.opacity="0"; panel.style.transform="scale(.95)"; caret.style.transform="rotate(0deg)"; }
-  function toggle(){ (panel.style.opacity === "1") ? close() : open(); }
+  function open() {
+    if (panel._open) return;
+    // Cerrar los demás antes de abrir este
+    closeAllFancyExcept(instance);
+
+    panel._open = true;
+    FS_OPEN_COUNT++;
+    panel.classList.remove("pointer-events-none");
+    panel.style.opacity = "1";
+    panel.style.transform = "scale(1)";
+    caret.style.transform = "rotate(180deg)";
+  }
+  function close() {
+    if (!panel._open) return;
+    panel._open = false;
+    FS_OPEN_COUNT = Math.max(0, FS_OPEN_COUNT - 1);
+    panel.classList.add("pointer-events-none");
+    panel.style.opacity = "0";
+    panel.style.transform = "scale(.95)";
+    caret.style.transform = "rotate(0deg)";
+  }
+  function toggle() { panel._open ? close() : open(); }
+
+  const instance = { wrapper, open, close, isOpen: () => panel._open };
+  FS_INSTANCES.add(instance);
 
   control.addEventListener("click", toggle);
-  document.addEventListener("click", (e) => { if (!wrapper.contains(e.target)) close(); });
+  // modo sticky: NO cerramos por click afuera; se cierra con botón
+  btnClose.addEventListener("click", () => close());
+
   nativeSelect.addEventListener("change", () => { syncControl(); renderList(); });
 
   syncControl();
   renderList();
-  nativeSelect._fancy = { wrapper, control, open, close, sync: syncControl, isFancy: true };
+  nativeSelect._fancy = { ...instance, sync: syncControl, isFancy: true };
 }
 
 /* =============== Card mesa =============== */
 function renderMesaCard(vm, estadosCatalogo, onAfterChange) {
   const nombreLower = norm(vm.nombreEstado);
-  const isLocked = nombreLower.includes("ocup") || nombreLower.includes("limpieza") || nombreLower.includes("fuera de uso");
+  // bloquear SOLO cuando está Ocupada o Reservada
+  const isLocked = nombreLower.includes("ocup") || nombreLower.includes("reserv");
 
-  let opciones = Array.isArray(estadosCatalogo) ? estadosCatalogo.slice() : [];
+  // mostrar solo Disponible / Limpieza / Fuera de uso
+  let opciones = filtraEstadosParaEdicion(Array.isArray(estadosCatalogo) ? estadosCatalogo.slice() : []);
   if (!opciones.length) opciones = [{ id: 1, nombre: "Disponible" }];
 
   const card = document.createElement("div");
@@ -447,12 +506,12 @@ function renderMesaCard(vm, estadosCatalogo, onAfterChange) {
   card.innerHTML = `
     <div class="flex items-center justify-between">
       <div class="text-lg font-semibold">${vm.nomMesa}</div>
-      <span class="px-2 py-1 text-xs rounded ${badgeClass(vm.nombreEstado)} capitalize">
+      <span class="estado-badge px-2 py-1 text-xs rounded ${badgeClass(vm.nombreEstado)} capitalize">
         ${vm.nombreEstado || "—"}
       </span>
     </div>
     <div class="mt-1 text-sm ${isLocked ? "text-red-600" : "text-gray-600"}">
-      ${isLocked ? "No editable" : "&nbsp;"}
+      ${isLocked ? "No editable (mesa con pedido/reserva)" : "&nbsp;"}
     </div>
     <div class="mt-auto">
       <label class="block text-xs text-gray-500 mb-1">Estado</label>
@@ -461,6 +520,7 @@ function renderMesaCard(vm, estadosCatalogo, onAfterChange) {
   `;
 
   const sel = card.querySelector(".sel-estado");
+  const badge = card.querySelector(".estado-badge");
 
   const ph = new Option("Estado", "", true, true);
   ph.disabled = true;
@@ -470,74 +530,93 @@ function renderMesaCard(vm, estadosCatalogo, onAfterChange) {
   const match = opciones.find(o => norm(o.nombre) === norm(vm.nombreEstado));
   if (match) sel.value = String(match.id);
 
-  upgradeSelect(sel, { placeholder: "Estado" });
+  // sticky + solo uno abierto
+  upgradeSelect(sel, { placeholder: "Estado", sticky: true });
 
+  // ...dentro de renderMesaCard(), después de upgradeSelect(...)
   sel.addEventListener("change", async () => {
     if (isLocked) return;
+
     const nuevoId = Number(sel.value);
     if (!Number.isFinite(nuevoId) || nuevoId === vm.idEstado) return;
+
     try {
       sel.disabled = true;
-      // 🔴 Usar la ruta real del backend
+      showBusy("Actualizando estado…");
+
       await updateMesaEstadoApi(vm.id, nuevoId);
-      showAlert("success", `${vm.nomMesa}: estado actualizado`);
-      onAfterChange?.();
+
+      // Actualiza badge en la tarjeta sin re-render global
+      const nuevo = opciones.find(o => o.id === nuevoId);
+      if (nuevo) {
+        vm.idEstado = nuevoId;
+        vm.nombreEstado = nuevo.nombre;
+        badge.textContent = nuevo.nombre;
+        badge.className =
+          `estado-badge px-2 py-1 text-xs rounded ${badgeClass(nuevo.nombre)} capitalize`;
+      }
+
+      showAlert("success", `${vm.nomMesa}: estado actualizado`, { timeout: 1800 });
     } catch (e) {
-      showAlert("error", e.message || "No se pudo actualizar la mesa");
+      showAlert("error", e?.message || "No se pudo actualizar la mesa");
+    } finally {
+      hideBusy();
       sel.disabled = false;
     }
   });
 
+
   return card;
 }
 
-/* =============== Render + sync + auto-refresh =============== */
+/* =============== Render + auto-refresh (sin overlay) =============== */
 let _mesasContainer = null;
 let _autoTimer = null;
 let _isRendering = false;
 
-async function renderMesasGrid(container) {
+async function renderMesasGrid(container, { firstLoad = false } = {}) {
   if (_isRendering) return;
   _isRendering = true;
 
   try {
-    if (!container.dataset._inited) {
-      container.dataset._inited = "1";
+    if (firstLoad && !container.dataset._loaded) {
+      // Mensaje inicial dentro del contenedor (no overlay)
       container.innerHTML = `<div class="py-10 text-center text-gray-500">Cargando mesas…</div>`;
     }
 
-    // 1) catálogo + mesas
+    // En el primer render mostramos overlay; en refrescos, no.
+    if (firstLoad && !container.dataset._loaded) showBusy("Cargando mesas…");
+
     const [estados, mesas] = await Promise.all([
       fetchEstadosMesa(),
-      getMesas(0, MAX_SIZE), // tu servicio ya pega a /apiMesa/getDataMesa
+      getMesas(0, MAX_SIZE),
     ]);
 
-    // 2) sincroniza BD según pedidos (PATCH reales a /apiMesa/estado/{id}/{estadoId})
-    const huboCambios = await syncMesasSegunPedidos(mesas, estados);
+    if (firstLoad && !container.dataset._loaded) hideBusy();
 
-    // 3) si hubo cambios, recarga mesas
+    // En primer render, también mostramos “Cargando pedidos…”
+    const huboCambios = await syncMesasSegunPedidos(mesas, estados, {
+      busy: firstLoad && !container.dataset._loaded
+    });
+
     const mesasFinal = huboCambios ? await getMesas(0, MAX_SIZE) : mesas;
 
-    // 4) mapa estados para etiqueta
     const estadosById = new Map(estados.map(e => [e.id, e]));
 
-    // 5) view
     const view = mesasFinal
       .map(m => {
-        // MesaDTO: Id, NomMesa, IdEstadoMesa
         const id = Number(m.Id ?? m.id ?? m.idMesa);
         const etiqueta = m.NomMesa || m.nomMesa || m.NombreMesa || m.nombreMesa || `Mesa ${id}`;
         const idEstado = Number(m.IdEstadoMesa ?? m.idEstadoMesa);
         const nombreEstado = estadosById.get(idEstado)?.nombre || "";
         return { id, nomMesa: etiqueta, idEstado, nombreEstado };
       })
-      .sort((a,b) => {
+      .sort((a, b) => {
         const na = Number(String(a.nomMesa).match(/\d+/)?.[0] || 0);
         const nb = Number(String(b.nomMesa).match(/\d+/)?.[0] || 0);
         return na - nb;
       });
 
-    // 6) render
     container.innerHTML = "";
     const grid = document.createElement("div");
     grid.className = "grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
@@ -546,6 +625,7 @@ async function renderMesasGrid(container) {
     const refresh = () => renderMesasGrid(container);
     view.forEach(vm => grid.appendChild(renderMesaCard(vm, estados, refresh)));
 
+    container.dataset._loaded = "1"; // ← evita que reaparezca “Cargando mesas…”
   } finally {
     _isRendering = false;
   }
@@ -554,7 +634,8 @@ async function renderMesasGrid(container) {
 function startAutoRefresh() {
   if (_autoTimer) return;
   _autoTimer = setInterval(() => {
-    if (document.hidden) return;
+    // Pausar si pestaña oculta o hay un select abierto o hay overlay
+    if (document.hidden || FS_OPEN_COUNT > 0 || BUSY_COUNT > 0) return;
     if (_mesasContainer) renderMesasGrid(_mesasContainer);
   }, AUTO_REFRESH_MS);
 }
@@ -573,14 +654,19 @@ async function init() {
   }
   _mesasContainer.classList.add("animate-[fadeIn_.2s_ease]");
 
-  await renderMesasGrid(_mesasContainer);
+  await renderMesasGrid(_mesasContainer, { firstLoad: true });
   startAutoRefresh();
 
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) stopAutoRefresh();
-    else { startAutoRefresh(); renderMesasGrid(_mesasContainer); }
+    else {
+      startAutoRefresh();
+      if (FS_OPEN_COUNT === 0 && BUSY_COUNT === 0) renderMesasGrid(_mesasContainer);
+    }
   });
 
-  // Si otra vista cambia pedidos, dispara este evento para refrescar al instante
-  window.addEventListener("pedido:cambiado", () => renderMesasGrid(_mesasContainer));
+  // Si otra vista cambia pedidos, refrescar si es seguro
+  window.addEventListener("pedido:cambiado", () => {
+    if (FS_OPEN_COUNT === 0 && BUSY_COUNT === 0) renderMesasGrid(_mesasContainer);
+  });
 }
