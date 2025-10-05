@@ -12,7 +12,8 @@
 
 <body class="bg-gray-50 font-sans">
 
-  <div class="w-full md:w-full lg:w-full mx-auto min-h-screen bg-white shadow-lg overflow-hidden relative flex flex-col">
+  <div
+    class="w-full md:w-full lg:w-full mx-auto min-h-screen bg-white shadow-lg overflow-hidden relative flex flex-col">
 
     <!-- Topbar -->
     <nav class="bg-blue-500 text-white p-4 nav-shadow rounded-b-xl relative">
@@ -94,12 +95,12 @@
       <h2 class="text-lg font-semibold mb-4 text-gray-700">Acciones rápidas</h2>
       <div class="grid grid-cols-2 gap-3 mb-6">
         <a href="orders.html"
-           class="bg-white border border-gray-200 p-3 rounded-lg flex flex-col items-center justify-center h-24 hover:bg-gray-50 transition">
+          class="bg-white border border-gray-200 p-3 rounded-lg flex flex-col items-center justify-center h-24 hover:bg-gray-50 transition">
           <i class="fas fa-plus-circle text-blue-500 text-2xl mb-2"></i>
           <span class="text-sm font-medium">Nuevo pedido</span>
         </a>
         <a href="reservations.html"
-           class="bg-white border border-gray-200 p-3 rounded-lg flex flex-col items-center justify-center h-24 hover:bg-gray-50 transition">
+          class="bg-white border border-gray-200 p-3 rounded-lg flex flex-col items-center justify-center h-24 hover:bg-gray-50 transition">
           <i class="fas fa-calendar-plus text-green-500 text-2xl mb-2"></i>
           <span class="text-sm font-medium">Nueva reserva</span>
         </a>
@@ -132,6 +133,21 @@
 
   </div>
 
-  <script src="js/main.js"></script>
+  <script>
+    // Debug: verificar token al cargar index.html
+    console.log('INDEX.HTML CARGADO');
+    console.log('Token presente:', sessionStorage.getItem('authToken') ? 'SÍ' : 'NO');
+
+    if (!sessionStorage.getItem('authToken')) {
+      console.error('NO HAY TOKEN - Probablemente problema de origen/dominio');
+      console.log('Origen actual:', window.location.origin);
+      console.log('Protocolo:', window.location.protocol);
+    }
+  </script>
+
+  <script type="module" src="js/main.js"></script>
+
+
 </body>
+
 </html>

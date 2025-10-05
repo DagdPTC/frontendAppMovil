@@ -1,7 +1,7 @@
 // js/LogIn.js (ES module) — anima como antes (fade de elementos + shrink header), toasts y redirect a index.html
-import { API, fetchJSON } from "./services/apiConfig.js";
+import { API, fetchJSON, setAuthToken, getAuthToken } from "./services/apiConfig.js";
 
-const $ = (s, r=document) => r.querySelector(s);
+const $ = (s, r = document) => r.querySelector(s);
 
 /* ====== helpers de alerta (mismo look & feel de pedidos) ====== */
 function ensureAlertHost() {
@@ -63,8 +63,8 @@ function playLoginSuccessFxFull() {
 document.addEventListener("DOMContentLoaded", () => {
   const form = $("#loginForm");
   const emailEl = $("#email");
-  const passEl  = $("#password");
-  const btn     = form?.querySelector('button[type="submit"]');
+  const passEl = $("#password");
+  const btn = form?.querySelector('button[type="submit"]');
 
   if (!form) return;
 
@@ -81,24 +81,51 @@ document.addEventListener("DOMContentLoaded", () => {
     btn?.setAttribute("disabled", "true");
 
     try {
-      // limpia sesión previa
-      try { await fetch(`${API.auth}/logout`, { method: "POST", credentials: "include" }); } catch {}
+      // Limpia sesión previa
+      try {
+        await fetch(`${API.auth}/logout`, { method: "POST", credentials: "include" });
+        setAuthToken(null);
+      } catch { }
 
-      // login
-      await fetchJSON(`${API.auth}/login`, {
+      // Login
+      const loginResponse = await fetchJSON(`${API.auth}/login`, {
         method: "POST",
         body: JSON.stringify({ correo, contrasenia }),
       });
 
-      // verifica contra cookie
+      // DEBUG: verifica que el token llegó
+      console.log('Login response:', loginResponse);
+      console.log('Token recibido:', loginResponse?.token);
+
+      // Guarda el token recibido
+      if (loginResponse?.token) {
+        setAuthToken(loginResponse.token);
+        console.log('Token guardado en sessionStorage:', sessionStorage.getItem('authToken'));
+      } else {
+        console.error('NO SE RECIBIÓ TOKEN EN LA RESPUESTA');
+      }
+
+      // DEBUG: verifica que fetchJSON agregará el header
+      console.log('Token antes de /me:', getAuthToken());
+
+      // Verifica contra el token guardado
       const me = await fetchJSON(`${API.auth}/me`, { method: "GET" });
+      console.log('Respuesta /me:', me);
+
+      // ... resto del código
       const mismoUsuario = (me?.correo || "").toLowerCase() === correo.toLowerCase();
       if (!mismoUsuario) {
-        try { await fetch(`${API.auth}/logout`, { method: "POST", credentials: "include" }); } catch {}
+        try {
+          await fetch(`${API.auth}/logout`, {
+            method: "POST",
+            credentials: "include"
+          });
+          setAuthToken(null);
+        } catch { }
         throw new Error("Credenciales inválidas.");
       }
 
-      // éxito → animación + toast + redirect a index
+      // Éxito
       playLoginSuccessFxFull();
       showAlert("success", "¡Bienvenido! Entrando…", { timeout: 1400 });
       setTimeout(() => { window.location.href = "index.html"; }, 1000);
@@ -115,7 +142,7 @@ document.addEventListener("DOMContentLoaded", () => {
 const toggleBtn = document.getElementById('togglePass');
 const passInput = document.getElementById('password');
 if (toggleBtn && passInput) {
-  const eyeOn  = toggleBtn.querySelector('.eye-on');
+  const eyeOn = toggleBtn.querySelector('.eye-on');
   const eyeOff = toggleBtn.querySelector('.eye-off');
   toggleBtn.addEventListener('click', () => {
     const show = passInput.type === 'password';

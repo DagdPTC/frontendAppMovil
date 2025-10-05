@@ -2,8 +2,8 @@
 // main.js (COMPLETO con autenticación y logout)
 // ==========================
 
-// ====== Config base - USAR HEROKU EN PRODUCCIÓN ======
-const API_BASE = "https://orderly-api-b53514e40ebd.herokuapp.com";
+// ====== IMPORTAR desde apiConfig.js ======
+import { API_BASE, fetchJSON, getAuthToken, setAuthToken } from './services/apiConfig.js';
 
 // Endpoint correcto según tu AuthController
 const ME_ENDPOINT = `${API_BASE}/api/auth/me`;
@@ -12,18 +12,15 @@ const ME_ENDPOINT = `${API_BASE}/api/auth/me`;
 // FUNCIONES DE AUTENTICACIÓN
 // ==========================
 
-// Configuración de headers básicos (sin token, porque va en cookie)
-function obtenerHeaders() {
-  return {
-    'Content-Type': 'application/json',
-  };
-}
+// ELIMINADA: Ya no necesitamos obtenerHeaders() aquí
+// La función fetchJSON de apiConfig.js ya maneja todo
 
 // Manejo global de errores de autenticación
 async function manejarErrorAuth(error, response) {
   if (response && (response.status === 401 || response.status === 403)) {
     console.warn('Sesión expirada o no autorizada. Redirigiendo al login...');
     localStorage.removeItem('orderly_me_cache');
+    setAuthToken(null); // Limpia el token usando apiConfig
     window.location.href = 'login.html';
     return true;
   }
@@ -36,22 +33,14 @@ function reiniciarSistemaSiEsNuevoDia() {
   const ultimaFecha = localStorage.getItem('ultimaFechaSistema');
 
   if (ultimaFecha !== hoy) {
-    // Reiniciar mesas a disponible
     const nuevasMesas = Array.from({ length: 12 }, (_, i) => ({
       number: i + 1,
       status: 'disponible'
     }));
     localStorage.setItem('estadoMesas', JSON.stringify(nuevasMesas));
-
-    // Eliminar pedidos guardados
     localStorage.removeItem('pedidosGuardados');
-
-    // Reiniciar estadísticas de pedidos del día
     localStorage.setItem('pedidosHoy', '0');
-
-    // Actualizar fecha registrada
     localStorage.setItem('ultimaFechaSistema', hoy);
-
     console.log('Sistema reiniciado automáticamente por nuevo día.');
   }
 }
@@ -75,53 +64,41 @@ function fmtFechaYMD(ymd) {
 // ==========================
 async function obtenerEstadisticasMesas() {
   try {
-    const mesasResponse = await fetch(`${API_BASE}/apiMesa/getDataMesa`, {
-      method: 'GET',
-      headers: obtenerHeaders(),
-      credentials: "include"
+    // Ahora usa fetchJSON que ya maneja los headers con token
+    const mesasData = await fetchJSON(`${API_BASE}/apiMesa/getDataMesa`, {
+      method: 'GET'
     });
 
-    if (await manejarErrorAuth(null, mesasResponse)) return;
-
-    const mesasData = await mesasResponse.json();
-
-    const estadosResponse = await fetch(`${API_BASE}/apiEstadoMesa/getDataEstadoMesa`, {
-      method: 'GET',
-      headers: obtenerHeaders(),
-      credentials: "include"
+    const estadosData = await fetchJSON(`${API_BASE}/apiEstadoMesa/getDataEstadoMesa`, {
+      method: 'GET'
     });
 
-    if (await manejarErrorAuth(null, estadosResponse)) return;
+    if (mesasData && Array.isArray(mesasData.content) && 
+        estadosData && Array.isArray(estadosData.content)) {
+      const mesas = mesasData.content;
+      const estadosMesas = estadosData.content;
+      const totalMesas = mesas.length;
+      let mesasDisponibles = 0;
 
-    const estadosData = await estadosResponse.json();
-
-    if (mesasResponse.ok && estadosResponse.ok) {
-      if (mesasData && Array.isArray(mesasData.content) && estadosData && Array.isArray(estadosData.content)) {
-        const mesas = mesasData.content;
-        const estadosMesas = estadosData.content;
-
-        const totalMesas = mesas.length;
-        let mesasDisponibles = 0;
-
-        mesas.forEach(mesa => {
-          const estadoMesa = estadosMesas.find(estado => estado.id === mesa.idEstadoMesa);
-          if (estadoMesa && estadoMesa.estadoMesa === 'Disponible') {
-            mesasDisponibles++;
-          }
-        });
-
-        const contador = document.getElementById('mesas-disponibles');
-        if (contador) {
-          contador.textContent = `${mesasDisponibles}/${totalMesas}`;
+      mesas.forEach(mesa => {
+        const estadoMesa = estadosMesas.find(estado => estado.id === mesa.idEstadoMesa);
+        if (estadoMesa && estadoMesa.estadoMesa === 'Disponible') {
+          mesasDisponibles++;
         }
-      } else {
-        console.error('Las mesas o estados no están en el formato esperado');
+      });
+
+      const contador = document.getElementById('mesas-disponibles');
+      if (contador) {
+        contador.textContent = `${mesasDisponibles}/${totalMesas}`;
       }
     } else {
-      console.error('Error al obtener las estadísticas de mesas:', mesasData, estadosData);
+      console.error('Las mesas o estados no están en el formato esperado');
     }
   } catch (error) {
     console.error('Error en la solicitud de estadísticas de mesas:', error);
+    if (error.message.includes('401') || error.message.includes('403')) {
+      window.location.href = 'login.html';
+    }
   }
 }
 
@@ -130,32 +107,25 @@ async function obtenerEstadisticasMesas() {
 // ==========================
 async function obtenerEstadisticasPedidos() {
   try {
-    const response = await fetch(`${API_BASE}/apiPedido/getDataPedido`, {
-      method: 'GET',
-      headers: obtenerHeaders(),
-      credentials: "include"
+    const data = await fetchJSON(`${API_BASE}/apiPedido/getDataPedido`, {
+      method: 'GET'
     });
 
-    if (await manejarErrorAuth(null, response)) return;
-
-    const data = await response.json();
-
-    if (response.ok) {
-      if (data && Array.isArray(data.content)) {
-        const pedidos = data.content;
-        const totalPedidos = pedidos.length;
-        const contador = document.getElementById('pedidos-hoy');
-        if (contador) {
-          contador.textContent = totalPedidos;
-        }
-      } else {
-        console.error('Los pedidos no están en el formato esperado');
+    if (data && Array.isArray(data.content)) {
+      const pedidos = data.content;
+      const totalPedidos = pedidos.length;
+      const contador = document.getElementById('pedidos-hoy');
+      if (contador) {
+        contador.textContent = totalPedidos;
       }
     } else {
-      console.error('Error al obtener las estadísticas de pedidos:', data);
+      console.error('Los pedidos no están en el formato esperado');
     }
   } catch (error) {
     console.error('Error en la solicitud de estadísticas de pedidos:', error);
+    if (error.message.includes('401') || error.message.includes('403')) {
+      window.location.href = 'login.html';
+    }
   }
 }
 
@@ -164,42 +134,31 @@ async function obtenerEstadisticasPedidos() {
 // ==========================
 async function obtenerOfertas() {
   try {
-    const response = await fetch(`${API_BASE}/apiOfertas/getDataOfertas`, {
-      method: 'GET',
-      headers: obtenerHeaders(),
-      credentials: "include"
+    const data = await fetchJSON(`${API_BASE}/apiOfertas/getDataOfertas`, {
+      method: 'GET'
     });
 
-    if (await manejarErrorAuth(null, response)) return [];
+    if (data && Array.isArray(data.data)) {
+      return data.data.map(oferta => {
+        const ini = fmtFechaYMD(oferta.fechaInicio);
+        const fin = fmtFechaYMD(oferta.fechaFin);
 
-    const data = await response.json();
+        let textoFecha = '';
+        if (ini && fin) {
+          textoFecha = ` · Del ${ini} al ${fin}`;
+        } else if (fin) {
+          textoFecha = ` · Hasta ${fin}`;
+        }
 
-    if (response.ok) {
-      if (data && Array.isArray(data.data)) {
-        return data.data.map(oferta => {
-          const ini = fmtFechaYMD(oferta.fechaInicio);
-          const fin = fmtFechaYMD(oferta.fechaFin);
-
-          let textoFecha = '';
-          if (ini && fin) {
-            textoFecha = ` · Del ${ini} al ${fin}`;
-          } else if (fin) {
-            textoFecha = ` · Hasta ${fin}`;
-          }
-
-          return {
-            title: oferta.descripcion,
-            content: `${oferta.porcentajeDescuento}% de descuento${textoFecha}`,
-            bgColor: oferta.bgColor || "bg-gradient-to-r from-blue-400 to-blue-600",
-            icon: oferta.icon || "fas fa-tag",
-          };
-        });
-      } else {
-        console.error('Las ofertas no están en el formato esperado');
-        return [];
-      }
+        return {
+          title: oferta.descripcion,
+          content: `${oferta.porcentajeDescuento}% de descuento${textoFecha}`,
+          bgColor: oferta.bgColor || "bg-gradient-to-r from-blue-400 to-blue-600",
+          icon: oferta.icon || "fas fa-tag",
+        };
+      });
     } else {
-      console.error('Error al obtener las ofertas:', data);
+      console.error('Las ofertas no están en el formato esperado');
       return [];
     }
   } catch (error) {
@@ -333,27 +292,18 @@ async function renderOfertas() {
 //  SALUDO DINÁMICO
 // ==========================
 
-// Obtiene el usuario actual desde /api/auth/me
 async function fetchUsuarioActual() {
   try {
-    const res = await fetch(ME_ENDPOINT, { 
-      method: "GET", 
-      headers: obtenerHeaders(), 
-      credentials: "include"
+    console.log('🔍 Token antes de /me:', getAuthToken() ? 'Existe' : 'NO HAY');
+    
+    const data = await fetchJSON(ME_ENDPOINT, {  // <-- Debe usar fetchJSON
+      method: "GET"
     });
     
-    if (!res.ok) {
-      console.warn(`/me respondió con ${res.status}`);
-      if (res.status === 401 || res.status === 403) {
-        return null;
-      }
-      return null;
-    }
-    
-    const data = await res.json();
+    console.log('Respuesta /me:', data);
     return data || null;
   } catch (error) {
-    console.error('Error al obtener usuario:', error);
+    console.error('Error:', error);
     return null;
   }
 }
@@ -362,10 +312,8 @@ async function fetchUsuarioActual() {
 function obtenerNombreMostrar(me) {
   if (!me) return null;
   
-  // Tu backend devuelve "username" en /me
   if (me.username) return String(me.username).trim();
   
-  // Fallback: usar el correo antes del @
   if (me.correo || me.email) {
     const correo = String(me.correo || me.email);
     const user = correo.split("@")[0] || correo;
@@ -394,11 +342,9 @@ function pintarUsuarioEnUI(me) {
   const menuRole = document.getElementById("user-menu-role");
   if (menuRole && rol) menuRole.textContent = rol;
 
-  // Si en el futuro agregas foto de perfil al backend
   const img = document.getElementById("user-menu-img");
   if (img && me.fotoUrl) img.src = me.fotoUrl;
 
-  // Guarda en cache para futuras cargas
   try { 
     localStorage.setItem("orderly_me_cache", JSON.stringify({ nombre, rol })); 
   } catch {}
@@ -431,27 +377,19 @@ function pintarDesdeCacheSiDisponible() {
 //  CERRAR SESIÓN
 // ==========================
 
-// Función para cerrar sesión
 async function cerrarSesion() {
   try {
-    const response = await fetch(`${API_BASE}/api/auth/logout`, {
-      method: 'POST',
-      headers: obtenerHeaders(),
-      credentials: 'include'
+    await fetchJSON(`${API_BASE}/api/auth/logout`, {
+      method: 'POST'
     });
-
-    if (response.ok) {
-      console.log('Sesión cerrada correctamente');
-    } else {
-      console.error('Error al cerrar sesión en el servidor');
-    }
+    console.log('Sesión cerrada correctamente');
   } catch (error) {
     console.error('Error en la solicitud de logout:', error);
   } finally {
-    // Siempre limpiar cache y redirigir, incluso si falla la petición
     localStorage.removeItem('orderly_me_cache');
     localStorage.removeItem('estadoMesas');
     localStorage.removeItem('pedidosGuardados');
+    setAuthToken(null); // Usa apiConfig para limpiar el token
     window.location.href = 'login.html';
   }
 }
@@ -463,7 +401,6 @@ function inicializarMenuUsuario() {
   const overlay = document.getElementById('overlay');
   const logoutBtn = document.getElementById('logout-btn');
 
-  // Abrir/cerrar menú al hacer clic en el botón
   if (userMenuBtn) {
     userMenuBtn.addEventListener('click', () => {
       if (userMenu) userMenu.classList.toggle('active');
@@ -471,7 +408,6 @@ function inicializarMenuUsuario() {
     });
   }
 
-  // Cerrar menú al hacer clic en el overlay
   if (overlay) {
     overlay.addEventListener('click', () => {
       if (userMenu) userMenu.classList.remove('active');
@@ -479,7 +415,6 @@ function inicializarMenuUsuario() {
     });
   }
 
-  // Cerrar sesión
   if (logoutBtn) {
     logoutBtn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -504,42 +439,52 @@ const actualizarTodo = () => {
 };
 
 // ==========================
-//  INICIALIZACIÓN
+//  INICIALIZACIÓN - VERSION DEBUG
 // ==========================
 document.addEventListener('DOMContentLoaded', async () => {
-  // Ejecutar reinicio automático al cargar
-  reiniciarSistemaSiEsNuevoDia();
-
-  // Inicializar menú de usuario y botón de logout
-  inicializarMenuUsuario();
-
-  // Saludo dinámico
-  pintarDesdeCacheSiDisponible();
+  console.log('====================================');
+  console.log('INICIANDO DEBUG DE AUTENTICACIÓN');
+  console.log('====================================');
+  
+  // 1. Verifica que el token existe
+  const token = sessionStorage.getItem('authToken');
+  console.log('1. Token en sessionStorage:', token ? `SÍ (${token.substring(0,30)}...)` : 'NO EXISTE');
+  
+  if (!token) {
+    console.error('PROBLEMA: No hay token en sessionStorage');
+    console.log('Posibles causas:');
+    console.log('- El login no guardó el token correctamente');
+    console.log('- Estás en un dominio diferente (file:// vs http://)');
+    return; // Detener aquí para no redirigir
+  }
+  
+  // 2. Intenta llamar a /me
+  console.log('2. Intentando llamar a /api/auth/me...');
   
   try {
     const me = await fetchUsuarioActual();
+    console.log('3. Respuesta de /me:', me);
+    
     if (me) {
+      console.log('SUCCESS: Usuario autenticado:', me.username || me.correo);
       pintarUsuarioEnUI(me);
-      console.log('Usuario autenticado:', me.username, '- Rol:', me.rol);
+      
+      // Continuar con el resto de la inicialización
+      reiniciarSistemaSiEsNuevoDia();
+      inicializarMenuUsuario();
+      obtenerEstadisticasMesas();
+      obtenerEstadisticasPedidos();
+      renderOfertas();
+      updateCurrentDate();
+      setInterval(actualizarTodo, 5000);
     } else {
-      console.warn('No se pudo obtener el usuario. Redirigiendo al login...');
-      window.location.href = 'login.html';
-      return;
+      console.error('PROBLEMA: /me retornó null o vacío');
+      console.log('El backend respondió pero sin datos de usuario');
+      // NO REDIRIGIR - mantener en la página para ver el error
     }
   } catch (e) {
-    console.warn("Error al obtener /me:", e);
-    window.location.href = 'login.html';
-    return;
+    console.error('ERROR al obtener /me:', e);
+    console.error('Detalles:', e.message);
+    // NO REDIRIGIR - mantener en la página para ver el error
   }
-
-  // Obtener estadísticas
-  obtenerEstadisticasMesas();
-  obtenerEstadisticasPedidos();
-
-  // Ofertas en el carrusel
-  renderOfertas();
-
-  // Resto de la inicialización
-  updateCurrentDate();
-  setInterval(actualizarTodo, 5000);
 });

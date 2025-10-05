@@ -1,3 +1,5 @@
+// js/services/apiConfig.js
+
 export const API_BASE = "https://orderly-api-b53514e40ebd.herokuapp.com";
 
 export const API = {
@@ -11,28 +13,67 @@ export const API = {
   auth:       `${API_BASE}/api/auth`,
 };
 
-export async function fetchJSON(url, opts = {}) {
-  const { headers, body } = opts;
-  const res = await fetch(url, {
-    method: opts.method || (body ? "POST" : "GET"),
-    credentials: "include",
-    headers: { "Accept": "application/json", "Content-Type": "application/json", ...(headers||{}) },
-    body,
-    redirect: opts.redirect || "follow",
-    cache: opts.cache || "no-cache",
-  });
-
-  if (res.status === 204) return null;
-
-  const text = await res.text().catch(() => "");
-  if (!res.ok) {
-    try {
-      const j = text ? JSON.parse(text) : null;
-      const msg = j?.message || j?.error || `${res.status} ${res.statusText}`;
-      throw new Error(typeof msg === "string" ? msg : `${res.status} ${res.statusText}`);
-    } catch {
-      throw new Error(`${res.status} ${res.statusText}${text ? " - " + text : ""}`);
-    }
+// Helper para guardar/obtener token
+export function setAuthToken(token) {
+  if (token) {
+    sessionStorage.setItem('authToken', token);
+    console.log('✓ Token guardado:', token.substring(0, 20) + '...');
+  } else {
+    sessionStorage.removeItem('authToken');
+    console.log('✓ Token eliminado');
   }
-  try { return text ? JSON.parse(text) : null; } catch { return text; }
+}
+
+export function getAuthToken() {
+  const token = sessionStorage.getItem('authToken');
+  console.log('→ getAuthToken():', token ? token.substring(0, 20) + '...' : 'null');
+  return token;
+}
+
+export async function fetchJSON(url, opts = {}) {
+  const token = getAuthToken();
+  
+  // Construye headers
+  const headers = {
+    "Content-Type": "application/json",
+    ...(opts.headers || {})
+  };
+  
+  // Si hay token, agrégalo al header
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+    console.log('→ fetchJSON agregando Authorization header para:', url);
+  } else {
+    console.log('→ fetchJSON SIN token para:', url);
+  }
+  
+  console.log('→ Headers finales:', headers);
+  
+  const res = await fetch(url, {
+    credentials: "include",
+    headers,
+    ...opts,
+  });
+  
+  console.log(`← Respuesta de ${url}: ${res.status} ${res.statusText}`);
+  
+  if (!res.ok) {
+    let msg = "";
+    try { 
+      const errorData = await res.json();
+      msg = errorData.error || res.statusText;
+      console.error('← Error JSON:', errorData);
+    } catch {
+      console.error('← Error sin JSON');
+    }
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
+  
+  const ct = res.headers.get("content-type") || "";
+  if (ct.includes("application/json")) {
+    const data = await res.json();
+    console.log('← Datos recibidos:', data);
+    return data;
+  }
+  return null;
 }
