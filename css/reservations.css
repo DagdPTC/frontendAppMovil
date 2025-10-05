@@ -1,91 +1,193 @@
-/* ====== LISTA / GRID ====== */
-#reservations-section {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 20px;
-  align-items: start;
+/**
+ * RESERVATIONS.CSS - Estilos para el sistema de reservas
+ */
+
+/* ============= Modal Base ============= */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
 }
 
-/* ====== CARD ====== */
-.res-card {
-  position: relative;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  box-shadow: 0 2px 8px rgba(0,0,0,.04);
-  overflow: hidden;
-  transition: transform .12s ease, box-shadow .12s ease;
-}
-.res-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(0,0,0,.06);
-}
-.res-card__accent {
-  height: 4px;
-  width: 100%;
-}
-.res-card__accent--pending { background: #f59e0b; }  /* ámbar */
-.res-card__accent--prep    { background: #60a5fa; }  /* azul */
-.res-card__accent--paid    { background: #22c55e; }  /* verde */
-.res-card__accent--deliv   { background: #8b5cf6; }  /* violeta */
-
-.res-card__body {
-  padding: 14px 14px 10px 14px;
-}
-.res-card__top {
-  display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px;
-}
-.res-card__title {
-  font-size:.75rem; font-weight:700; color:#6b7280; letter-spacing:.04em;
+.modal-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9999;
+  max-height: 90vh;
+  overflow-y: auto;
+  width: 90%;
+  max-width: 700px;
 }
 
-/* ====== KEY-VALUE filas cortas ====== */
-.kv { display:flex; gap:6px; font-size:.875rem; margin: 4px 0; }
-.kv__k { width:64px; color:#6b7280; }
-.kv__v { color:#111827; }
+/* ============= Animaciones ============= */
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
 
-/* ====== DETALLE PLEGABLE ====== */
-.res-card__details {
-  margin-top: 8px;
-  border-top: 1px solid #f3f4f6;
-  padding-top: 10px;
-  padding-bottom: 12px;
+.modal-content {
+  animation: modalFadeIn 0.2s ease-out;
 }
-.detail-row { display:flex; gap:8px; font-size:.85rem; line-height:1.35; margin: 3px 0; }
-.detail-row__k { width:80px; color:#6b7280; }
-.detail-row__v { color:#111827; }
 
-/* ====== ACCIONES ====== */
-.res-card__actions {
-  display:flex; gap:14px; padding: 8px 14px 14px; border-top: 1px dashed #e5e7eb;
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.btn-link {
-  color:#2563eb; font-weight:600; font-size:.9rem; padding: 4px 0; border:0; background:transparent; cursor:pointer;
-}
-.btn-link:hover { text-decoration: underline; }
-.btn-danger {
-  color:#ef4444; font-weight:600; font-size:.9rem; padding: 4px 0; border:0; background:transparent; cursor:pointer;
-}
-.btn-danger:hover { text-decoration: underline; }
 
-/* ====== BADGES / BOTONES ====== */
-.badge {
-  display:inline-block; padding: 3px 8px; border-radius: 9999px; font-size: .70rem;
-  font-weight:600; border:1px solid transparent; color:#374151; background:#f3f4f6;
+.fadeSlideIn {
+  animation: fadeSlideIn 0.25s ease-out both;
 }
-.badge--pending { background:#fff7ed; border-color:#f59e0b33; color:#92400e; }
-.badge--prep    { background:#eff6ff; border-color:#60a5fa33; color:#1d4ed8; }
-.badge--paid    { background:#ecfdf5; border-color:#22c55e33; color:#065f46; }
-.badge--deliv   { background:#f5f3ff; border-color:#8b5cf633; color:#5b21b6; }
 
-.btn-detail {
-  font-size:.85rem; color:#374151; background: #f3f4f6; border: 1px solid #e5e7eb;
-  border-radius: 9999px; padding: 4px 10px; cursor: pointer;
+/* ============= Badges de Estado ============= */
+.badge--pending {
+  background: #fee2e2;
+  color: #991b1b;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
 }
-.btn-detail:hover { background:#e5e7eb; }
 
-/* ====== UTILIDAD (mesas/platillos seleccionados) ====== */
+.badge--prep {
+  background: #ffedd5;
+  color: #9a3412;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.badge--paid {
+  background: #dcfce7;
+  color: #166534;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.badge--deliv {
+  background: #e0e7ff;
+  color: #1e3a8a;
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* ============= Botón de Mesa Seleccionada ============= */
 .mesa-btn-selected {
-  background: #e0f2fe !important;
-  border-color: #93c5fd !important;
+  background-color: #3b82f6 !important;
+  color: #fff !important;
+  border-color: #2563eb !important;
+}
+
+/* ============= Scroll suave para el modal ============= */
+.modal-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ============= Estados de error ============= */
+.error-message {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: #dc2626;
+  font-size: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+.error-message i {
+  font-size: 0.875rem;
+}
+
+/* ============= Responsive ============= */
+@media (max-width: 768px) {
+  .modal-content {
+    width: 95%;
+    max-width: none;
+    max-height: 95vh;
+  }
+}
+
+/* ============= Utilidades adicionales ============= */
+.hidden {
+  display: none !important;
+}
+
+/* Prevenir interacción con el fondo cuando el modal está abierto */
+body.modal-open {
+  overflow: hidden;
+}
+
+/* ============= Modal de selección de mesas - z-index superior ============= */
+#tables-modal {
+  z-index: 10000 !important;
+}
+
+#tables-modal > div:first-child {
+  z-index: 10000;
+}
+
+#tables-modal > div:last-child {
+  z-index: 10001;
+}
+
+/* ============= Mejoras visuales para cards de reserva ============= */
+.reservation-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.reservation-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 
+              0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* ============= Focus states mejorados ============= */
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  ring: 2px;
+  ring-color: rgba(59, 130, 246, 0.5);
+}
+
+/* ============= Botones de acción ============= */
+.action-btn {
+  transition: all 0.2s ease;
+}
+
+.action-btn:active {
+  transform: scale(0.98);
 }
