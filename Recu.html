@@ -2,61 +2,148 @@
 <html lang="es">
 
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Orderly - Recuperación de contraseña</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="css/Recu.css">
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Orderly - Recuperación de contraseña</title>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Inter para empatar con login -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Estilos (match login) -->
+  <link rel="stylesheet" href="css/Recu.css" />
+
+  <!-- Solo estilos de la flecha (no toca tu CSS existente) -->
+  <style>
+    /* Flecha minimal arriba-izquierda (siempre visible sobre el header) */
+    .back-arrow{
+      position:absolute;
+      top: calc(12px + env(safe-area-inset-top));
+      left: calc(12px + env(safe-area-inset-left));
+      z-index: 60;               /* por encima del glow y cualquier overlay */
+      width: 40px;
+      height: 40px;
+      display: grid;
+      place-items: center;
+      color: #fff;               /* flecha blanca */
+      background: transparent;
+      border: none;
+      border-radius: 9999px;
+      cursor: pointer;
+      transition: background-color .18s ease, transform .1s ease, opacity .18s ease;
+    }
+    .back-arrow:hover{ background: rgba(255,255,255,.14); }
+    .back-arrow:active{ transform: translateY(1px); }
+    .back-arrow svg{ width: 22px; height: 22px; }
+
+    @media (min-width: 768px){
+      .back-arrow{ top: 18px; left: 18px; }
+    }
+
+    /* (opcional) mantiene el ancho máximo del contenedor glass como en login */
+    :root{ --form-max-w: 620px; }
+    #loginCard > div{
+      width: clamp(320px, 92vw, var(--form-max-w));
+      margin-inline: auto;
+    }
+    @media (min-width: 768px){
+      #loginCard > div{ width: min(84vw, var(--form-max-w)); }
+    }
+    @media (min-width: 1024px){
+      #loginCard > div{ width: var(--form-max-w); }
+    }
+  </style>
 </head>
 
-<body class="flex items-center justify-center p-0 m-0 bg-gray-50">
-    <div class="relative md:w-full lg:w-full w-full h-screen mx-auto overflow-hidden bg-white md:shadow-xl orderly-container" style="max-height: 100vh; border-radius:0;">
-        <!-- Header azul SOLO bordes inferiores redondeados -->
-        <!-- REMOVÍ LAS CLASES DE TAILWIND QUE CAUSABAN CONFLICTO -->
-        <div class="h-2/5 top-section relative">
-            <div class="absolute inset-0 flex flex-col items-center justify-center p-6">
-                <div class="w-20 h-20 bg-white rounded-2xl flex items-center justify-center shadow-lg mb-4 overflow-hidden">
-                    <img src="img/Logo.jpg" alt="Orderly" class="object-contain w-full h-full">
-                </div>
-                <h1 class="text-3xl font-bold text-white">Orderly</h1>
-                <p class="text-blue-100 mt-2">Organiza tu restaurante fácilmente</p>
-            </div>
-        </div>
-        <!-- Formulario con todas las esquinas redondeadas -->
-        <div class="absolute bottom-0 left-0 right-0 bg-white p-4 md:p-8 shadow"
-            style="height: 60%;">
-            <div class="relative -top-12 md:-top-16 bg-white shadow-lg p-4 md:p-6 mx-2 md:mx-4"
-                style="border-radius: 28px;">
-                <h2 class="text-lg md:text-xl font-semibold text-gray-800 mb-2 md:mb-3 text-center">Recuperación de
-                    contraseña</h2>
-                <p class="text-gray-600 text-center mb-4 md:mb-6 text-sm md:text-base">
-                    Ingresa tu correo electrónico para recibir un código de verificación y confirmar tu identidad.
-                </p>
-                <form id="recuForm" class="space-y-3 md:space-y-4">
-                    <div class="relative mb-6">
-                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
-                            <i class="fa fa-envelope"></i>
-                        </span>
-                        <input type="email"
-                            class="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-left font-roboto"
-                            placeholder="Correo electrónico" required />
-                    </div>
-                    <button type="submit"
-                        class="btn-recu w-full py-2 md:py-3 px-4 text-white font-medium rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-50 text-sm md:text-base">
-                        Siguiente
-                    </button>
-                </form>
-            </div>
-        </div>
-    </div>
-    <!-- Botón de regreso -->
-    <button class="back-button" onclick="window.location.href='LogIn.html'">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+<body class="min-h-screen bg-gradient-to-b from-[#e8f1ff] via-white to-white text-slate-800"
+  style="font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Arial;">
+
+  <!-- Vista tipo “app” -->
+  <div class="orderly-container relative w-full h-screen mx-auto overflow-hidden bg-white md:shadow-xl">
+
+    <header id="loginHeader" class="top-section relative h-2/5 rounded-b-3xl overflow-hidden">
+      <!-- Flecha minimal -->
+      <button class="back-arrow" aria-label="Volver" onclick="window.location.href='LogIn.html'">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 19l-7-7 7-7"></path>
         </svg>
-        Atrás
-    </button>
-    <script src="js/Recu.js"></script>
+      </button>
+
+      <div class="pointer-events-none absolute -inset-1 opacity-60"
+           style="background: radial-gradient(1200px 420px at 50% -120px, rgba(255,255,255,.25), transparent 60%);">
+      </div>
+
+      <div id="loginHeaderTexts"
+           class="relative z-10 h-full flex flex-col items-center justify-center px-6 text-center">
+        <div class="brand-badge brand--wide mb-3">
+          <img
+            src="img/logo tipografico blanco.png"
+            srcset="img/logo tipografico blanco.png 1x,
+                    img/logo tipografico blanco@2x.png 2x,
+                    img/logo tipografico blanco@3x.png 3x"
+            alt="Orderly"
+            class="brand-img brand-img--wide"
+            width="220" height="56" loading="eager" decoding="async" />
+        </div>
+      </div>
+    </header>
+
+    <!-- CARD (glass) como login -->
+    <main id="loginCard"
+          class="absolute bottom-0 left-0 right-0 bg-white rounded-t-[28px] md:rounded-t-[32px] p-4 md:p-8"
+          style="height:60%;">
+      <div
+        class="relative -top-12 md:-top-16 bg-white/90 backdrop-blur-md shadow-[0_20px_60px_-20px_rgba(30,64,175,.25)] ring-1 ring-black/5 p-5 md:p-6 mx-2 md:mx-6 rounded-2xl">
+
+        <h2 class="text-2xl md:text-[28px] font-semibold text-slate-900 tracking-tight text-center mb-4">
+          Recuperación de contraseña
+        </h2>
+
+        <p class="text-slate-600 text-center mb-6">
+          Ingresa tu correo electrónico para recibir un código de verificación y confirmar tu identidad.
+        </p>
+
+        <!-- Formulario (IDs intactos) -->
+        <form id="recuForm" class="space-y-4">
+          <div class="group">
+            <div class="field-row relative">
+              <span class="input-icon" aria-hidden="true">
+                <!-- Sobre minimal -->
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"
+                     stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5">
+                  <rect x="3.5" y="6.5" width="17" height="11" rx="2"></rect>
+                  <path d="M4 8l8 5 8-5"></path>
+                </svg>
+              </span>
+
+              <!-- Mismo input de login -->
+              <input type="email" required
+                class="input-field w-full pl-11 pr-4 py-3 rounded-xl bg-slate-50/80 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 transition-all"
+                placeholder="Correo electrónico" />
+            </div>
+          </div>
+
+          <!-- Botón: hereda estilo del login -->
+          <button type="submit"
+            class="btn-login btn-recu w-full py-3 md:py-3.5 rounded-xl font-semibold text-white tracking-wide shadow-lg shadow-blue-500/20 focus:outline-none focus:ring-4 focus:ring-blue-500/25 active:scale-[.99]">
+            Siguiente
+          </button>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('recuForm')?.addEventListener('submit', (e) => {
+        e.preventDefault();
+        window.location.href = 'Cod.html';
+      });
+    });
+  </script>
 </body>
+
 </html>

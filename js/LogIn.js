@@ -110,3 +110,20 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 });
+
+// Toggle ver/ocultar contraseña (no interfiere con el login)
+const toggleBtn = document.getElementById('togglePass');
+const passInput = document.getElementById('password');
+if (toggleBtn && passInput) {
+  const eyeOn  = toggleBtn.querySelector('.eye-on');
+  const eyeOff = toggleBtn.querySelector('.eye-off');
+  toggleBtn.addEventListener('click', () => {
+    const show = passInput.type === 'password';
+    passInput.type = show ? 'text' : 'password';
+    toggleBtn.setAttribute('aria-label', show ? 'Ocultar contraseña' : 'Mostrar contraseña');
+    eyeOn.classList.toggle('hidden', show);
+    eyeOff.classList.toggle('hidden', !show);
+  });
+}
+
+

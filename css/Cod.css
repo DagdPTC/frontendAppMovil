@@ -1,250 +1,134 @@
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-/* Estilos para: body */
-body {
-    font-family: 'Roboto', Arial, sans-serif;
-    background-color: #f8fafc;
-    height: 100vh;
-    overflow: hidden;
+:root{
+  --primaryA:#234fe0;
+  --primaryB:#2b5aeb;
+  --ink:#0f172a;
+  --ring:rgba(37,99,235,.16);
+  /* mismo límite de ancho que en login/recu */
+  --form-max-w: 620px;
 }
 
-/* Animación de entrada para el contenedor principal */
-/* Estilos para: .cod-container */
-.cod-container {
-    background: #fff;
-    box-shadow: 0 6px 24px rgba(30, 64, 175, 0.09), 0 1.5px 4px rgba(30, 64, 175, 0.06);
-    border-radius: 0px;
-    padding: 0;
-    overflow: hidden;
-    animation: codFadeInUp 0.8s cubic-bezier(.48,.05,.19,1.02);
+/* Base */
+*{ box-sizing:border-box }
+html,body{ height:100% }
+body{
+  font-family:'Inter', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  color:var(--ink);
+  overflow:hidden;
 }
 
-/* Estilos para: @keyframes codFadeInUp */
-@keyframes codFadeInUp {
-/* Estilos para: from */
-    from {
-        opacity: 0;
-        transform: translateY(48px);
-    }
-/* Estilos para: to */
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
+/* Fondo wallpaper como en login/recu */
+.orderly-container{
+  background-image: url("../img/login-bg-out.png") !important;
+  background-size: cover;
+  background-position: center top;
+  background-repeat: no-repeat;
 }
 
-/* Header superior azul, solo bordes inferiores redondeados */
-/* Estilos para: .cod-top-section */
-.cod-top-section {
-    background: #3B82F6;
-    border-bottom-left-radius: 16px;
-    border-bottom-right-radius: 16px;
-    border-top-left-radius: 0 !important;
-    border-top-right-radius: 0 !important;
-    box-shadow: 0 2px 16px rgba(30, 64, 175, 0.07);
-    position: relative;
+/* El sheet inferior transparente para ver el wallpaper detrás */
+#loginCard{ background: transparent !important; }
+
+/* Límite y centrado del formulario (glass) */
+#loginCard > div{
+  width: clamp(320px, 92vw, var(--form-max-w));
+  margin-inline: auto;
+  /* ---- animación de entrada (igual a recu) ---- */
+  animation: fadeUp .6s cubic-bezier(.32,.08,.24,1) both;
+}
+@media (min-width:768px){
+  #loginCard > div{ width:min(84vw, var(--form-max-w)); }
+}
+@media (min-width:1024px){
+  #loginCard > div{ width:var(--form-max-w); }
 }
 
-/* Icono central en círculo blanco */
-/* Estilos para: .cod-top-section .w-20 */
-.cod-top-section .w-20 {
-    background: #fff;
-    border-radius: 16px;
-    box-shadow: 0 4px 12px rgba(30, 64, 175, 0.11);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 1rem;
-    animation: codPopIn 0.9s cubic-bezier(.48,.05,.19,1.02);
+/* Botón igual que en login, con animación de entrada */
+.btn-login{
+  display:inline-flex; align-items:center; justify-content:center;
+  border:none; border-radius:14px; color:#fff; font-weight:600; letter-spacing:.02em;
+  background: linear-gradient(90deg, var(--primaryA) 0%, var(--primaryB) 100%);
+  box-shadow: 0 16px 34px -16px color-mix(in oklab, var(--primaryA) 40%, transparent),
+              0 8px 16px -14px rgba(17,24,39,.18);
+  transition: transform .14s ease, box-shadow .2s ease, filter .2s ease, background .2s ease;
+  /* animación de carga (como recuButtonFadeIn) */
+  opacity:0; transform: translateY(10px) scale(.98);
+  animation: btnIn .55s .40s forwards;
 }
-/* Estilos para: @keyframes codPopIn */
-@keyframes codPopIn {
-    0% { transform: scale(0.7); opacity: 0;}
-    70% { transform: scale(1.06);}
-    100% { transform: scale(1); opacity: 1;}
+.btn-login:hover{
+  filter:brightness(1.03); transform:translateY(-1px);
+  box-shadow:0 22px 44px -18px color-mix(in oklab, var(--primaryA) 50%, transparent);
 }
+.btn-login:active{ transform:translateY(0) }
 
-/* Estilos para: .cod-top-section h1 */
-.cod-top-section h1 {
-    color: #fff;
-    font-weight: 700;
-    font-size: 2rem;
-    margin: 0;
+/* Marca (logo ancho) + pop de entrada (como recuPopIn) */
+.brand--wide{
+  padding:.55rem .8rem;
+  background:linear-gradient(180deg, rgba(255,255,255,.18), rgba(255,255,255,.10));
+  border:1px solid rgba(255,255,255,.28);
+  border-radius:16px;
+  backdrop-filter:blur(6px) saturate(120%);
+  -webkit-backdrop-filter:blur(6px) saturate(120%);
+  box-shadow:0 10px 26px -12px rgba(10,24,68,.45), inset 0 1px 0 rgba(255,255,255,.25);
+  animation: logoPop .9s cubic-bezier(.48,.05,.19,1.02) both;
 }
+.brand-img{ display:block; image-rendering:auto !important; transform:translateZ(0); filter:drop-shadow(0 1px 6px rgba(0,0,0,.18)); }
+.brand-img--wide{ width:clamp(160px, 46vw, 220px); height:auto; }
 
-/* Estilos para: .cod-top-section p */
-.cod-top-section p {
-    color: #e0f2fe;
-    font-size: 1rem;
-    margin-top: 0.5rem;
+/* Flecha con círculo (mismo tamaño final que acordamos) */
+#loginHeader .back-arrow{
+  position:absolute; z-index:30;
+  top: clamp(12px, 2.2vw, 18px);
+  left: clamp(12px, 2.2vw, 18px);
+  width: 64px; height: 64px;        /* tamaño final que dejaste OK */
+  border-radius: 9999px;
+  display:flex; align-items:center; justify-content:center;
+  color:#fff;
+  background: rgba(255,255,255,.10);
+  border: 1px solid rgba(255,255,255,.35);
+  box-shadow: 0 6px 22px rgba(2,6,23,.25), inset 0 1px 0 rgba(255,255,255,.35);
+  backdrop-filter: blur(6px) saturate(120%);
+  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  transition: transform .12s ease, background-color .2s ease, border-color .2s ease, box-shadow .2s ease;
 }
-
-/* Tarjeta de código */
-/* Estilos para: .cod-bottom-card */
-.cod-bottom-card {
-    background: #fff;
-    border-top-left-radius: 2rem;
-    border-top-right-radius: 2rem;
-    box-shadow: 0 1px 10px rgba(30, 64, 175, 0.04);
-    z-index: 2;
+#loginHeader .back-arrow:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,.16);
+  border-color: rgba(255,255,255,.45);
 }
-
-/* Estilos para: .cod-card */
-.cod-card {
-    background: #fff;
-    border-radius: 20px;
-    box-shadow: 0 4px 16px rgba(30, 64, 175, 0.08);
-    animation: codFadeInUp 0.9s 0.25s backwards cubic-bezier(.48,.05,.19,1.02);
-}
-
-/* Título */
-/* Estilos para: h2 */
-h2 {
-    color: #222e3a;
-    font-weight: 600;
-    text-align: center;
-    margin-bottom: 1.2rem;
+#loginHeader .back-arrow:active{ transform: translateY(0); }
+#loginHeader .back-arrow svg{
+  width: 30px; height: 30px; stroke: #fff; stroke-width: 3;
 }
 
-/* Input para el código tipo OTP */
-/* Estilos para: .codinput-container */
-.codinput-container {
-    display: flex;
-    justify-content: center;
-    gap: 18px;
-    margin-bottom: 28px;
+/* Inputs OTP con entrada escalonada (como los inputs de recu) */
+.codinput-container{ display:flex; justify-content:center; gap:18px; margin-bottom:28px; }
+.codinput-input{
+  width:32px; height:36px; font-size:1.8rem; color:#222e3a; text-align:center;
+  border:none; border-bottom:3px solid #666; background:transparent; outline:none; transition:border-color .2s;
+  opacity:0; transform: translateY(10px) scale(.97);
+  animation: otpIn .45s forwards;
 }
-/* Estilos para: .codinput-input */
-.codinput-input {
-    width: 32px;
-    height: 36px;
-    font-size: 1.8rem;
-    color: #222e3a;
-    text-align: center;
-    border: none;
-    border-bottom: 3px solid #666;
-    background: transparent;
-    outline: none;
-    transition: border-color .2s;
-}
-/* Estilos para: .codinput-input:focus */
-.codinput-input:focus {
-    border-bottom-color: #2563eb;
-}
-/* Estilos para: @media (max-width: 600px) */
-@media (max-width: 600px) {
-/* Estilos para: .codinput-input */
-    .codinput-input {
-        width: 28px;
-        height: 32px;
-        font-size: 1.1rem;
-    }
-    .codinput-container { gap: 12px; }
+.codinput-container input:nth-child(1){ animation-delay:.15s }
+.codinput-container input:nth-child(2){ animation-delay:.20s }
+codinput-container input:nth-child(3){ animation-delay:.25s } /* fallback si falta el punto */
+.codinput-container input:nth-child(3){ animation-delay:.25s }
+.codinput-container input:nth-child(4){ animation-delay:.30s }
+.codinput-container input:nth-child(5){ animation-delay:.35s }
+.codinput-container input:nth-child(6){ animation-delay:.40s }
+.codinput-input:focus{ border-bottom-color:#2563eb; }
+
+@media (max-width:600px){
+  .codinput-input{ width:28px; height:32px; font-size:1.1rem; }
+  .codinput-container{ gap:12px; }
 }
 
-/* Botón código animado */
-/* Estilos para: .btn-cod */
-.btn-cod {
-    background: #3B82F6;
-    border: none;
-    color: #fff;
-    font-weight: 600;
-    border-radius: 12px;
-    box-shadow: 0 2px 10px rgba(30, 64, 175, 0.13);
-    transition: 
-        transform 0.17s cubic-bezier(.48,.05,.19,1.02), 
-        box-shadow 0.18s cubic-bezier(.48,.05,.19,1.02), 
-        background 0.18s cubic-bezier(.48,.05,.19,1.02);
-    outline: none;
-    opacity: 0;
-    transform: translateY(24px) scale(0.98);
-    animation: codButtonFadeIn 0.7s 0.6s forwards;
-    will-change: transform, box-shadow;
+/* ===== Animaciones (idénticas en espíritu a Recu) ===== */
+@keyframes fadeUp{ from{opacity:0; transform:translateY(18px)} to{opacity:1; transform:none} }
+@keyframes logoPop{
+  0%{ opacity:0; transform:scale(.86) }
+  70%{ transform:scale(1.06) }
+  100%{ opacity:1; transform:scale(1) }
 }
-
-/* Estilos para: @keyframes codButtonFadeIn */
-@keyframes codButtonFadeIn {
-/* Estilos para: to */
-    to {
-        opacity: 1;
-        transform: translateY(0) scale(1);
-    }
-}
-
-/* Estilos para: .btn-cod:hover, .btn-cod:focus */
-.btn-cod:hover, .btn-cod:focus {
-    background: #2563EB;
-    transform: scale(1.12) translateY(-4px);
-    box-shadow: 0 16px 40px rgba(37, 99, 235, 0.23);
-}
-
-/* Responsive */
-/* Estilos para: @media (max-height: 700px) */
-@media (max-height: 700px) {
-/* Estilos para: .cod-container */
-    .cod-container {
-        height: 100vh !important;
-        border-radius: 0 !important;
-    }
-/* Estilos para: .cod-top-section */
-    .cod-top-section {
-        border-radius: 0 0 32px 32px !important;
-    }
-}
-
-/* Estilos para el botón de regreso */
-        .back-button {
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            background: #3B82F6;
-            color: white;
-            border: none;
-            border-radius: 50px;
-            padding: 12px 20px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 500;
-            font-size: 16px;
-            cursor: pointer;
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            z-index: 1000;
-        }
-
-        .back-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
-        }
-
-        .back-button:active {
-            background: white;
-            color: #3B82F6;
-            border: 2px solid #3B82F6;
-            transform: translateY(0) scale(0.95);
-            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
-            animation: pressAnimation 0.2s ease-out;
-        }
-
-        .back-button:active svg {
-            color: #3B82F6;
-        }
-
-        @keyframes pressAnimation {
-            0% {
-                transform: translateY(-2px) scale(1);
-            }
-            50% {
-                transform: translateY(0) scale(0.95);
-            }
-            100% {
-                transform: translateY(0) scale(0.95);
-            }
-        }
-
-        .back-button svg {
-            width: 20px;
-            height: 20px;
-            transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
+@keyframes otpIn{ to{ opacity:1; transform:none } }
+@keyframes btnIn{ to{ opacity:1; transform:none } }

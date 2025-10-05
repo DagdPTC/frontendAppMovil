@@ -1,104 +1,92 @@
 <!DOCTYPE html>
 <html lang="es">
-    <!-- INICIO DE LA CABECERA DEL DOCUMENTO (HEAD) -->
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Orderly - Código de verificación</title>
-    <!-- Inclusión de un archivo o bloque de JavaScript -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Inclusión de hoja de estilos CSS -->
-    <link rel="stylesheet" href="css/Cod.css">
-    <!-- Inclusión de hoja de estilos CSS -->
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
-    <style>
-        .otp-container {
-            display: flex;
-            justify-content: center;
-            gap: 18px;
-            margin-bottom: 28px;
-        }
-        .otp-input {
-            width: 32px;
-            height: 36px;
-            font-size: 1.8rem;
-            color: #222e3a;
-            text-align: center;
-            border: none;
-            border-bottom: 3px solid #666;
-            background: transparent;
-            outline: none;
-            transition: border-color .2s;
-        }
-        .otp-input:focus {
-            border-bottom-color: #2563eb;
-        }
-        @media (max-width: 600px) {
-            .otp-input {
-                width: 28px;
-                height: 32px;
-                font-size: 1.1rem;
-            }
-            .otp-container { gap: 12px; }
-        }
-    </style>
-    <!-- FIN DE LA CABECERA DEL DOCUMENTO (HEAD) -->
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Orderly - Código de verificación</title>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Inter para empatar con login -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Estilos -->
+  <link rel="stylesheet" href="css/Cod.css" />
 </head>
-    <!-- INICIO DEL CUERPO PRINCIPAL (BODY) -->
-<body class="flex items-center justify-center p-0 m-0">
-    <!-- Sección o contenedor: <div class="relative w-full h-screen max-w-md mx-auto overflow-hidden bg-white md:rounded-3xl md:shadow-xl cod-container" style="max-height: 100vh;"> -->
-    <div class="relative md:w-full lg:w-full w-full h-screen mx-auto overflow-hidden bg-white md:shadow-xl orderly-container" style="max-height: 100vh; border-radius:0;">
-    <!-- Sección o contenedor: <div class="h-2/5 cod-top-section relative"> -->
-        <div class="h-2/5 cod-top-section relative">
-    <!-- Sección o contenedor: <div class="absolute inset-0 flex flex-col items-center justify-center p-6"> -->
-            <div class="absolute inset-0 flex flex-col items-center justify-center p-6">
-    <!-- Sección o contenedor: <div class="w-20 h-20 bg-white rounded-2xl flex items-center justify-center shadow-lg mb-4"> -->
-                <div class="w-20 h-20 bg-white rounded-2xl flex items-center justify-center shadow-lg mb-4 overflow-hidden">
-                    <img src="img/Logo.jpg" alt="Orderly" class="object-contain w-full h-full">
-                </div>
-                <h1 class="text-3xl font-bold text-white">Orderly</h1>
-                <p class="text-blue-100 mt-2">Organiza tu restaurante fácilmente</p>
-            </div>
-        </div>
-    <!-- Sección o contenedor: <div class="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl p-4 md:p-8 cod-bottom-card" style="height: 60%;"> -->
-        <div class="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl p-4 md:p-8 cod-bottom-card" style="height: 60%;">
-    <!-- Sección o contenedor: <div class="relative -top-12 md:-top-16 bg-white rounded-2xl shadow-lg p-4 md:p-6 mx-2 md:mx-4 cod-card"> -->
-            <div class="relative -top-12 md:-top-16 bg-white rounded-2xl shadow-lg p-4 md:p-6 mx-2 md:mx-4 cod-card">
-                <h2 class="text-lg md:text-xl font-semibold text-gray-800 mb-2 md:mb-3 text-center">Recuperación de contraseña</h2>
-                <p class="text-gray-600 text-center mb-4 md:mb-6 text-sm md:text-base">
-                    Ingresa el código que enviamos a tu correo para verificar tu cuenta.
-                </p>
-    <!-- Inicio de formulario -->
-                <form id="codForm" class="space-y-3 md:space-y-4" autocomplete="off">
-    <!-- Sección o contenedor: <div class="codinput-container"> -->
-                    <div class="codinput-container">
-                        <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
-                        <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
-                        <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
-                        <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
-                        <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
-                        <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
-                    </div>
+<body class="min-h-screen bg-gradient-to-b from-[#e8f1ff] via-white to-white text-slate-800"
+      style="font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Arial;">
 
-                    <button type="submit" class="btn-cod w-full py-2 md:py-3 px-4 text-white font-medium rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-50 text-sm md:text-base">
-                        Siguiente
-                    </button>
-    <!-- Fin de formulario -->
-                </form>
-            </div>
-        </div>
-    </div>
+  <!-- Vista tipo “app” -->
+  <div class="orderly-container relative w-full h-screen mx-auto overflow-hidden bg-white md:shadow-xl">
 
-    <!-- Botón de regreso -->
-    <button class="back-button" onclick="window.location.href='Recu.html'">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+    <!-- Header -->
+    <header id="loginHeader" class="top-section relative h-2/5 rounded-b-3xl overflow-hidden">
+      <!-- Flecha minimal en círculo -->
+      <button class="back-arrow" aria-label="Volver" onclick="window.location.href='Recu.html'">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 19l-7-7 7-7"></path>
         </svg>
-        Atrás
-    </button>
+      </button>
 
-    <!-- Inclusión de un archivo o bloque de JavaScript -->
-    <script src="js/Cod.js"></script>
-    <!-- FIN DEL CUERPO PRINCIPAL (BODY) -->
+      <!-- Glow sutil -->
+      <div class="pointer-events-none absolute -inset-1 opacity-60"
+           style="background: radial-gradient(1200px 420px at 50% -120px, rgba(255,255,255,.25), transparent 60%);">
+      </div>
+
+      <!-- Marca -->
+      <div id="loginHeaderTexts"
+           class="relative z-10 h-full flex flex-col items-center justify-center px-6 text-center">
+        <div class="brand-badge brand--wide mb-3">
+          <img
+            src="img/logo tipografico blanco.png"
+            srcset="img/logo tipografico blanco.png 1x,
+                    img/logo tipografico blanco@2x.png 2x,
+                    img/logo tipografico blanco@3x.png 3x"
+            alt="Orderly"
+            class="brand-img brand-img--wide"
+            width="220" height="56" loading="eager" decoding="async" />
+        </div>
+      </div>
+    </header>
+
+    <!-- CARD (glass) -->
+    <main id="loginCard"
+          class="absolute bottom-0 left-0 right-0 bg-white rounded-t-[28px] md:rounded-t-[32px] p-4 md:p-8"
+          style="height:60%;">
+      <div
+        class="relative -top-12 md:-top-16 bg-white/90 backdrop-blur-md shadow-[0_20px_60px_-20px_rgba(30,64,175,.25)] ring-1 ring-black/5 p-5 md:p-6 mx-2 md:mx-6 rounded-2xl">
+
+        <h2 class="text-2xl md:text-[28px] font-semibold text-slate-900 tracking-tight text-center mb-4">
+          Recuperación de contraseña
+        </h2>
+
+        <p class="text-slate-600 text-center mb-6">
+          Ingresa el código que enviamos a tu correo para verificar tu cuenta.
+        </p>
+
+        <!-- Formulario (mantengo tu lógica OTP) -->
+        <form id="codForm" class="space-y-4" autocomplete="off">
+          <div class="codinput-container">
+            <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
+            <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
+            <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
+            <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
+            <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
+            <input type="text" maxlength="1" pattern="[0-9]*" inputmode="numeric" class="codinput-input" required>
+          </div>
+
+          <!-- Botón igual al login -->
+          <button type="submit"
+            class="btn-login w-full py-3 md:py-3.5 rounded-xl font-semibold text-white tracking-wide shadow-lg shadow-blue-500/20 focus:outline-none focus:ring-4 focus:ring-blue-500/25 active:scale-[.99]">
+            Siguiente
+          </button>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <!-- Tu JS OTP intacto -->
+  <script src="js/Cod.js"></script>
 </body>
 </html>
