@@ -11,6 +11,7 @@ export const API = {
   empleado:   `${API_BASE}/apiEmpleado`,
   reserva:    `${API_BASE}/apiReserva`,
   auth:       `${API_BASE}/api/auth`,
+  recovery:   `${API_BASE}/auth/recovery`, // Nuevo endpoint de recuperación
 };
 
 // Helper para guardar/obtener token
@@ -28,6 +29,33 @@ export function getAuthToken() {
   const token = sessionStorage.getItem('authToken');
   console.log('→ getAuthToken():', token ? token.substring(0, 20) + '...' : 'null');
   return token;
+}
+
+// Helper para gestionar datos de recuperación temporal
+export function setRecoveryData(email, code = null) {
+  const data = { email, timestamp: Date.now() };
+  if (code) data.code = code;
+  sessionStorage.setItem('recoveryData', JSON.stringify(data));
+  console.log('✓ Datos de recuperación guardados:', email);
+}
+
+export function getRecoveryData() {
+  const data = sessionStorage.getItem('recoveryData');
+  if (!data) return null;
+  
+  const parsed = JSON.parse(data);
+  // Verificar que no hayan pasado más de 15 minutos
+  const elapsed = Date.now() - parsed.timestamp;
+  if (elapsed > 15 * 60 * 1000) {
+    clearRecoveryData();
+    return null;
+  }
+  return parsed;
+}
+
+export function clearRecoveryData() {
+  sessionStorage.removeItem('recoveryData');
+  console.log('✓ Datos de recuperación eliminados');
 }
 
 export async function fetchJSON(url, opts = {}) {
