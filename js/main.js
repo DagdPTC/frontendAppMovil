@@ -200,7 +200,7 @@
     // Si es auth/permiso, no ensuciar la consola: asumimos "sin ofertas visibles"
     if (e.status === 401 || e.status === 403) return [];
     // Otros errores sí se registran
-    console.error('Error en la solicitud de ofertas:', e);
+    console.error('Error en la solicitud de ofertas:', e); 
     return [];
   }
 }
