@@ -43,40 +43,37 @@ function handle401(e) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
-  // Antes de montar listeners o cargar datos, verificamos sesión llamando a /me
+  // 1) chequear sesión
   try {
-    const me = await getSessionUser(); // usa cookie HttpOnly (credentials: 'include')
-    if (!me) {
-      renderAuthGate(); // no hay sesión -> bloquea
-      return;
-    }
-  } catch {
-    renderAuthGate();
-    return;
-  }
+    const me = await getSessionUser();
+    if (!me) { renderAuthGate(); return; }
+  } catch { renderAuthGate(); return; }
 
-  // ====== Solo si hay sesión continuamos con la UI de Reservas ======
-  $("#items-per-page")?.addEventListener("change", async (e) => {
-    pageSize = parseInt(e.target.value, 10) || 10;
-    currentPage = 0;
-    await loadAndRender();
+  // 2) listeners correctos (coinciden con los IDs que ya tienes)
+  newReservationBtn?.addEventListener("click", () => {
+    clearForm();
+    setFormModeCreate();
+    openForm();
   });
-  $("#add-reservation-btn")?.addEventListener("click", openCreateModal);
-  $("#close-modal")?.addEventListener("click", closeModal);
-  $("#cancel-reservation")?.addEventListener("click", closeModal);
-  $("#reservation-form")?.addEventListener("submit", submitForm);
+  cancelReservationBtn?.addEventListener("click", () => {
+    clearForm();
+    closeForm();
+  });
+  saveReservationBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    handleSave();
+  });
+  selectTablesBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    openTablesModal();
+  });
 
-  $("#filter-status")?.addEventListener("change", renderTable);
-  $("#search-input")?.addEventListener("input", renderTable);
-
-  setupLiveValidation();
-
-  await bootstrapCatalogs();   // carga catálogos/mesas
-  await loadAndRender();
-
-  // Si el token/cookie se invalida y alguna llamada devuelve 401,
-  // handle401() mostrará el mismo card y parará el flujo.
+  // 3) validación + catálogos + datos
+  setupRealtimeValidation();
+  await loadTiposEvento();
+  await loadFromAPI();
 });
+
 
 
 
@@ -1158,30 +1155,6 @@ selectTablesBtn?.addEventListener("click", (e)=>{
   openTablesModal(); 
 });
 
-/* ======================= init ======================= */
-(function init(){
-  console.log("[ReservaController] Iniciando con validaciones mejoradas...");
-  
-  // Setup validación en tiempo real
-  setupRealtimeValidation();
-
-  console.log("[Init] Verificando elementos del DOM:");
-  console.log("- reservationsSection:", reservationsSection ? "✓" : "✗");
-  console.log("- buttonSection:", buttonSection ? "✓" : "✗");
-  console.log("- reservationForm:", reservationForm ? "✓" : "✗");
-  console.log("- newReservationBtn:", newReservationBtn ? "✓" : "✗");
-
-  loadTiposEvento();
-  loadFromAPI();
-  
-  console.log("[ReservaController] ✓ Inicialización completa");
-  console.log("✓ Cliente: Solo letras y espacios");
-  console.log("✓ Teléfono: Formato 0000-0000 automático");
-  console.log("✓ Fecha: Mínimo 2 días de anticipación");
-  console.log("✓ Hora: Formato fijo HH:MM (los dos puntos siempre presentes)");
-  console.log("✓ Personas: Máximo 200");
-  console.log("✓ Mesas: Selección múltiple habilitada");
-})();
 
 function setupLiveValidation() {
   // Cliente

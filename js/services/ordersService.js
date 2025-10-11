@@ -40,21 +40,34 @@ export async function ensureMeInSession(opts = {}) {
   const KEY = "ord_user";
   const force = opts.forceNetwork === true;
 
+  // si no hay token, no pegamos /me (evita 401 ruidoso)
+  const tok = readToken();
+  if (!tok) {
+    try { sessionStorage.removeItem(KEY); } catch {}
+    return null;
+  }
+
   if (!force) {
     try {
       const cached = JSON.parse(sessionStorage.getItem(KEY) || "null");
       if (cached && cached.correo) return cached;
-    } catch { /* ignore */ }
+    } catch {}
   }
 
   try {
     const res = await fetch(`${API_HOST}/api/auth/me`, {
       method: "GET",
       credentials: "include",
+      headers: authHeaders(),               // <<<<<<<< AQUI
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
 
+    if (res.status === 401) {
+      sessionStorage.removeItem(KEY);
+      return null;                          // no logueado
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
     const me = {
       correo: data.correo || null,
       rol: data.rol || null,
@@ -67,39 +80,32 @@ export async function ensureMeInSession(opts = {}) {
     return me;
   } catch (e) {
     try { sessionStorage.removeItem(KEY); } catch {}
-    return { correo: null, rol: null, username: null, usuarioId: null, idEmpleado: null, error: e?.message || String(e) };
+    return null;
   }
 }
+
 
 
 export async function fetchJSON(url, options = {}) {
   const res = await fetch(url, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers: authHeaders({ "Content-Type": "application/json", ...(options.headers || {}) }), // <<<<<<<<
     ...options,
   });
 
   if (!res.ok) {
-    let bodyText = null;
-    let bodyJson = null;
-    try { bodyJson = await res.json(); }
-    catch { try { bodyText = await res.text(); } catch { bodyText = null; } }
-
-    console.error("[API ERROR]", url, res.status, bodyJson || bodyText || "(sin cuerpo)");
-
-    const msg =
-      (bodyJson && (bodyJson.message || bodyJson.error || bodyJson.title)) ||
-      `HTTP ${res.status}`;
-
+    let bodyText = null, bodyJson = null;
+    try { bodyJson = await res.json(); } catch { try { bodyText = await res.text(); } catch {} }
+    const msg = (bodyJson && (bodyJson.message || bodyJson.error || bodyJson.title)) || `HTTP ${res.status}`;
     const err = new Error(msg);
     err.status = res.status;
     err.details = bodyJson || bodyText;
     throw err;
   }
-
   if (res.status === 204) return null;
   return res.json();
 }
+
 
 
 
@@ -317,3 +323,16 @@ export async function getEstadosPedido() {
   console.log("[EstadosPedido]", arr.length, "via", url);
   return arr;
 }
+
+// === auth helpers (colócalo arriba del archivo)
+function readToken() {
+  // usa las mismas llaves que en tu proyecto
+  return sessionStorage.getItem("authToken") || localStorage.getItem("AUTH_TOKEN");
+}
+function authHeaders(extra = {}) {
+  const h = new Headers({ Accept: "application/json", ...extra });
+  const t = readToken();
+  if (t) h.set("Authorization", `Bearer ${t}`);
+  return h;
+}
+

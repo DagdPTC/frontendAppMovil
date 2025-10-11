@@ -18,7 +18,7 @@ async function fetchJSON(url, options = {}) {
     ...options,
     headers: { 
       "Content-Type": "application/json",
-      ...(options.headers || {}) 
+      ...authHeaders(options.headers || {})
     }
   });
 
@@ -137,4 +137,15 @@ export async function getSessionUser() {
 
 export function isAuthError(err) {
   return err?.status === 401 || err?.status === 403;
+}
+
+// === añadir (igual que en menuService) ===
+function readToken() {
+  return sessionStorage.getItem("authToken") || localStorage.getItem("AUTH_TOKEN");
+}
+function authHeaders(extra = {}) {
+  const h = { Accept: "application/json", ...extra };
+  const t = readToken();
+  if (t) h.Authorization = `Bearer ${t}`;
+  return h;
 }
