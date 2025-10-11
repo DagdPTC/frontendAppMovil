@@ -124,3 +124,17 @@ export async function getMesas(page = 0, size = 200) {
 }
 
 console.log("[reservaService] módulo cargado correctamente");
+
+export async function getSessionUser() {
+  try {
+    const me = await fetchJSON(URL_ME);        // usa credentials: 'include'
+    return me?.data ?? me;                     // por si tu API envuelve en { data: ... }
+  } catch (e) {
+    if (e?.status === 401) return null;        // no logueado -> null
+    throw e;                                   // otros errores -> propagar
+  }
+}
+
+export function isAuthError(err) {
+  return err?.status === 401 || err?.status === 403;
+}
