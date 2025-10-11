@@ -1,6 +1,20 @@
 // js/services/menuService.js
 import { API } from "./apiConfig.js";
 
+// Lee el token, sin depender de ningún otro archivo.
+// Usa las dos llaves que has usado en el proyecto.
+function readToken() {
+  return sessionStorage.getItem("authToken") || localStorage.getItem("AUTH_TOKEN");
+}
+
+function authHeaders(extra = {}) {
+  const h = new Headers({ Accept: "application/json", ...extra });
+  const t = readToken();
+  if (t) h.set("Authorization", `Bearer ${t}`);
+  return h;
+}
+
+
 /* ===== helpers ===== */
 const toNum = (v) => {
   const n = Number(v);
@@ -13,15 +27,18 @@ function pickArray(payload) {
   if (Array.isArray(payload)) return payload;
   return [];
 }
+
 async function getJSON(url) {
-  const res = await fetch(url, { credentials: "include",
-    headers: { Accept: "application/json" },
+  const res = await fetch(url, {
+    credentials: "include",
+    headers: authHeaders(),   // <-- aquí va el Bearer si existe
     cache: "no-cache",
   });
   const txt = await res.text().catch(() => "");
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${txt}`);
   return txt ? JSON.parse(txt) : null;
 }
+
 
 /* ===== normalizadores (AJUSTADOS a tu API) ===== */
 // Platillo: { id, nomPlatillo, descripcion, precio, idCate, imagenUrl?, publicId? }
@@ -120,3 +137,22 @@ export async function getCategorias(page = 0) {
 
 /* ===== (opcional) helpers exportables ===== */
 export const _normalize = { normalizePlatillo, normalizeCategoria };
+
+// === Auth helpers (usando tu API config) ===
+export async function getSessionUser() {
+  try {
+    // Suponiendo que en apiConfig.js tienes API.auth = "<base>/api/auth"
+    // Si en tu apiConfig el path difiere, ajusta aquí.
+    return await getJSON(`${API.auth}/me`);
+  } catch (e) {
+    // Si no hay sesión o el backend devuelve 401, devolvemos null
+    if (String(e?.message || "").startsWith("401")) return null;
+    return null;
+  }
+}
+
+export function isAuthError(err) {
+  const msg = String(err?.message || "");
+  return msg.includes("401") || /no autorizado|unauthor/i.test(msg);
+}
+

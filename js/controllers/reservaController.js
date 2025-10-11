@@ -1,7 +1,85 @@
 /*RESERVACONTROLLER.JS - CON VALIDACIONES MEJORADAS Y REQUISITOS ESPECÍFICOS */
 import {
+  getSessionUser, isAuthError,
   getReserva, createReserva, updateReserva, deleteReserva, getTiposReserva, getMesas
 } from "../services/reservaService.js";
+
+// ==========================
+// AUTH GATE para Reservas
+// ==========================
+function renderAuthGate() {
+  // Dibuja el card de "Sesión requerida" en el área principal
+  const host =
+    document.querySelector("main") ||
+    document.querySelector(".main-content") ||
+    document.body;
+
+  if (!host) return;
+
+  host.innerHTML = `
+    <div class="p-6 grid place-items-center min-h-[60vh]">
+      <div class="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow p-6 text-center">
+        <div class="mx-auto w-14 h-14 rounded-full bg-blue-50 grid place-items-center mb-3">
+          <i class="fa-solid fa-lock text-blue-600 text-xl"></i>
+        </div>
+        <h2 class="text-lg font-semibold mb-1">Sesión requerida</h2>
+        <p class="text-gray-600 mb-4">Inicia sesión para ver y gestionar las reservaciones.</p>
+        <a href="login.html"
+           class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition">
+          <i class="fa-solid fa-arrow-right-to-bracket"></i>
+          Iniciar sesión
+        </a>
+      </div>
+    </div>
+  `;
+}
+
+function handle401(e) {
+  if (e && e.status === 401) {
+    renderAuthGate();     // bloquea la UI con el mismo aviso
+    return true;
+  }
+  return false;
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  // Antes de montar listeners o cargar datos, verificamos sesión llamando a /me
+  try {
+    const me = await getSessionUser(); // usa cookie HttpOnly (credentials: 'include')
+    if (!me) {
+      renderAuthGate(); // no hay sesión -> bloquea
+      return;
+    }
+  } catch {
+    renderAuthGate();
+    return;
+  }
+
+  // ====== Solo si hay sesión continuamos con la UI de Reservas ======
+  $("#items-per-page")?.addEventListener("change", async (e) => {
+    pageSize = parseInt(e.target.value, 10) || 10;
+    currentPage = 0;
+    await loadAndRender();
+  });
+  $("#add-reservation-btn")?.addEventListener("click", openCreateModal);
+  $("#close-modal")?.addEventListener("click", closeModal);
+  $("#cancel-reservation")?.addEventListener("click", closeModal);
+  $("#reservation-form")?.addEventListener("submit", submitForm);
+
+  $("#filter-status")?.addEventListener("change", renderTable);
+  $("#search-input")?.addEventListener("input", renderTable);
+
+  setupLiveValidation();
+
+  await bootstrapCatalogs();   // carga catálogos/mesas
+  await loadAndRender();
+
+  // Si el token/cookie se invalida y alguna llamada devuelve 401,
+  // handle401() mostrará el mismo card y parará el flujo.
+});
+
+
+
 
 /* ======================= helpers (inline) ======================= */
 const $  = (s, r = document) => r.querySelector(s);
@@ -1104,3 +1182,98 @@ selectTablesBtn?.addEventListener("click", (e)=>{
   console.log("✓ Personas: Máximo 200");
   console.log("✓ Mesas: Selección múltiple habilitada");
 })();
+
+function setupLiveValidation() {
+  // Cliente
+  clientNameInput?.addEventListener("input", () => {
+    if (!clientError) return;
+    const ok = clientNameInput.value.trim() !== "";
+    clientError.classList.toggle("hidden", ok);
+  });
+
+  // Teléfono (8 dígitos formateado 0000-0000)
+  clientPhoneInput?.addEventListener("input", () => {
+    let v = clientPhoneInput.value.replace(/[^0-9]/g, "").slice(0, 8);
+    if (v.length > 4) v = v.slice(0, 4) + "-" + v.slice(4);
+    clientPhoneInput.value = v;
+    if (!phoneError) return;
+    const ok = v.replace(/\D/g, "").length === 8;
+    phoneError.classList.toggle("hidden", ok);
+  });
+
+  // Fecha
+  dateInput?.addEventListener("input", () => {
+    if (!dateError) return;
+    dateError.classList.toggle("hidden", dateInput.value !== "");
+  });
+
+  // Horas
+  function validateTimePair() {
+    if (!timeStartError || !timeEndError) return;
+
+    // normaliza “h:mm”
+    const norm = (s) => {
+      const m = String(s||"").trim().match(/^(\d{1,2})(?::(\d{1,2}))?$/);
+      if (!m) return "";
+      const h = Math.min(Math.max(parseInt(m[1],10)||0,1),12);
+      const mi = Math.min(Math.max(parseInt(m[2]||"0",10),0),59);
+      return `${h}:${String(mi).padStart(2,"0")}`;
+    };
+
+    timeStartInput.value = norm(timeStartInput.value);
+    timeEndInput.value   = norm(timeEndInput.value);
+
+    const s = toMinutesFrom12(timeStartInput.value, startAmPmSelect.value);
+    const e = toMinutesFrom12(timeEndInput.value,   endAmPmSelect.value);
+
+    let okStart = Number.isFinite(s);
+    let okEnd   = Number.isFinite(e);
+    let okPair  = okStart && okEnd && e > s && (e - s) >= 30 && (e - s) <= 480;
+
+    timeStartError.classList.toggle("hidden", okStart);
+    timeEndError.classList.toggle("hidden", okEnd && okPair);
+
+    if (okStart && okEnd) {
+      if (e <= s) {
+        timeEndError.textContent = "La hora fin debe ser posterior a la hora inicio.";
+      } else if (e - s < 30) {
+        timeEndError.textContent = "La reserva debe durar al menos 30 minutos.";
+      } else if (e - s > 480) {
+        timeEndError.textContent = "La reserva no puede durar más de 8 horas.";
+      } else {
+        timeEndError.textContent = "Hora de fin inválida.";
+      }
+    }
+  }
+  timeStartInput?.addEventListener("input", validateTimePair);
+  timeEndInput?.addEventListener("input", validateTimePair);
+  startAmPmSelect?.addEventListener("change", validateTimePair);
+  endAmPmSelect?.addEventListener("change", validateTimePair);
+
+  // Personas
+  peopleInput?.addEventListener("input", () => {
+    if (!peopleError) return;
+    let v = peopleInput.value.replace(/[^0-9]/g,"");
+    let n = parseInt(v||"0",10);
+    if (!Number.isFinite(n) || n <= 0) {
+      peopleError.textContent = "Ingrese la cantidad de personas.";
+      peopleError.classList.remove("hidden");
+    } else if (n > 200) {
+      peopleError.textContent = "Máximo 200 personas.";
+      peopleError.classList.remove("hidden");
+      n = 200; v = "200";
+    } else {
+      peopleError.classList.add("hidden");
+    }
+    peopleInput.value = String(n || v);
+  });
+
+  // Tipo de evento
+  eventSelect?.addEventListener("change", () => {
+    if (!eventError) return;
+    const ok = !!Number(eventSelect.value);
+    eventError.classList.toggle("hidden", ok);
+  });
+
+  // Mesas: se muestra el error solo al guardar; no hay validación en vivo aquí
+}

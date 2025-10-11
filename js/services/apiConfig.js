@@ -1,5 +1,4 @@
 // js/services/apiConfig.js
-
 export const API_BASE = "https://orderly-api-b53514e40ebd.herokuapp.com";
 
 export const API = {
@@ -11,97 +10,72 @@ export const API = {
   empleado:   `${API_BASE}/apiEmpleado`,
   reserva:    `${API_BASE}/apiReserva`,
   auth:       `${API_BASE}/api/auth`,
-  recovery:   `${API_BASE}/auth/recovery`, // Nuevo endpoint de recuperación
+  recovery:   `${API_BASE}/auth/recovery`,
 };
 
-// Helper para guardar/obtener token
 export function setAuthToken(token) {
-  if (token) {
-    sessionStorage.setItem('authToken', token);
-    console.log('✓ Token guardado:', token.substring(0, 20) + '...');
-  } else {
-    sessionStorage.removeItem('authToken');
-    console.log('✓ Token eliminado');
+  if (!token) {
+    sessionStorage.removeItem("authToken");
+    localStorage.removeItem("AUTH_TOKEN");
+    return;
   }
+  sessionStorage.setItem("authToken", token);
+  localStorage.setItem("AUTH_TOKEN", token);
 }
-
 export function getAuthToken() {
-  const token = sessionStorage.getItem('authToken');
-  console.log('→ getAuthToken():', token ? token.substring(0, 20) + '...' : 'null');
-  return token;
+  return sessionStorage.getItem("authToken") || localStorage.getItem("AUTH_TOKEN");
 }
 
-// Helper para gestionar datos de recuperación temporal
+/* ====== Recovery (igual que tenías) ====== */
 export function setRecoveryData(email, code = null) {
   const data = { email, timestamp: Date.now() };
   if (code) data.code = code;
-  sessionStorage.setItem('recoveryData', JSON.stringify(data));
-  console.log('✓ Datos de recuperación guardados:', email);
+  sessionStorage.setItem("recoveryData", JSON.stringify(data));
+  console.log("✓ Datos de recuperación guardados:", email);
 }
-
 export function getRecoveryData() {
-  const data = sessionStorage.getItem('recoveryData');
-  if (!data) return null;
-  
-  const parsed = JSON.parse(data);
-  // Verificar que no hayan pasado más de 15 minutos
-  const elapsed = Date.now() - parsed.timestamp;
-  if (elapsed > 15 * 60 * 1000) {
+  const raw = sessionStorage.getItem("recoveryData");
+  if (!raw) return null;
+  const parsed = JSON.parse(raw);
+  if (Date.now() - parsed.timestamp > 15 * 60 * 1000) {
     clearRecoveryData();
     return null;
   }
   return parsed;
 }
-
 export function clearRecoveryData() {
-  sessionStorage.removeItem('recoveryData');
-  console.log('✓ Datos de recuperación eliminados');
+  sessionStorage.removeItem("recoveryData");
+  console.log("✓ Datos de recuperación eliminados");
+}
+
+function buildHeaders(extra = {}, hasJSONBody = false) {
+  const h = new Headers({ Accept: "application/json" });
+  const token = getAuthToken();
+  if (token && !("Authorization" in extra)) h.set("Authorization", `Bearer ${token}`);
+  if (hasJSONBody && !("Content-Type" in extra)) h.set("Content-Type", "application/json");
+  Object.entries(extra || {}).forEach(([k, v]) => h.set(k, v));
+  return h;
 }
 
 export async function fetchJSON(url, opts = {}) {
-  const token = getAuthToken();
-  
-  // Construye headers
-  const headers = {
-    "Content-Type": "application/json",
-    ...(opts.headers || {})
-  };
-  
-  // Si hay token, agrégalo al header
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-    console.log('→ fetchJSON agregando Authorization header para:', url);
-  } else {
-    console.log('→ fetchJSON SIN token para:', url);
-  }
-  
-  console.log('→ Headers finales:', headers);
-  
+  const hasJSONBody = !!opts.body && !(opts.body instanceof FormData);
   const res = await fetch(url, {
     credentials: "include",
-    headers,
+    cache: "no-cache",
     ...opts,
+    headers: buildHeaders(opts.headers || {}, hasJSONBody),
   });
-  
-  console.log(`← Respuesta de ${url}: ${res.status} ${res.statusText}`);
-  
+
+  const text = await res.text().catch(() => "");
   if (!res.ok) {
-    let msg = "";
-    try { 
-      const errorData = await res.json();
-      msg = errorData.error || res.statusText;
-      console.error('← Error JSON:', errorData);
-    } catch {
-      console.error('← Error sin JSON');
-    }
-    throw new Error(msg || `HTTP ${res.status}`);
+    let payload = null;
+    try { payload = text ? JSON.parse(text) : null; } catch {}
+    const msg = payload?.message || payload?.error || payload?.detail || text || `${res.status} ${res.statusText}`;
+    const err = new Error(msg);
+    err.status = res.status;
+    err.details = payload || text;
+    throw err;
   }
-  
-  const ct = res.headers.get("content-type") || "";
-  if (ct.includes("application/json")) {
-    const data = await res.json();
-    console.log('← Datos recibidos:', data);
-    return data;
-  }
-  return null;
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return null; }
 }

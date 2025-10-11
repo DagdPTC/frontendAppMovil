@@ -9,6 +9,10 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="css/styles.css" />
   <link rel="stylesheet" href="css/tables.css">
+  <style>
+    /* Gate de autenticación: pantalla limpia y centrada */
+    #auth-gate[hidden] { display: none !important; }
+  </style>
 </head>
 
 <body class="bg-gray-50 font-sans h-[100svh] overflow-hidden">
@@ -23,12 +27,30 @@
       </div>
     </nav>
 
-    <main class="p-4 pb-24 flex-1 overflow-y-auto overscroll-contain">
+    <!-- GATE: solo visible cuando NO hay sesión -->
+    <main id="auth-gate" class="p-6 flex-1 grid place-items-center">
+      <div class="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow p-6 text-center">
+        <div class="mx-auto w-14 h-14 rounded-full bg-blue-50 grid place-items-center mb-3">
+          <i class="fa-solid fa-lock text-blue-600 text-xl"></i>
+        </div>
+        <h2 class="text-lg font-semibold mb-1">Sesión requerida</h2>
+        <p class="text-gray-600 mb-4">
+          Para ver y gestionar las mesas necesitas iniciar sesión primero.
+        </p>
+        <a href="login.html"
+           class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition">
+          <i class="fa-solid fa-arrow-right-to-bracket"></i>
+          Iniciar sesión
+        </a>
+      </div>
+    </main>
+
+    <!-- CONTENIDO REAL (solo visible con sesión) -->
+    <main id="mesas-auth-content" class="p-4 pb-24 flex-1 overflow-y-auto overscroll-contain" hidden>
       <div id="mesas-page">
         <h1 class="text-xl font-semibold mb-3">Mesas</h1>
         <div id="mesas-grid"></div>
       </div>
-
     </main>
 
     <!-- BARRA INFERIOR TIPO WEB APP -->
@@ -57,12 +79,9 @@
 
   </div>
 
+  <!-- Guard de autenticación (reutilizable) -->
+  <script type="module" src="js/utils/authGuard.js"></script>
+  <!-- Controlador de Mesas (ya incluye verificación) -->
   <script type="module" src="js/controllers/mesaController.js"></script>
-
-
-
-
-
 </body>
-
 </html>

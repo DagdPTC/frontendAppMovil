@@ -1,4 +1,5 @@
 // js/controllers/ordersController.js
+// Reemplaza COMPLETO este archivo
 
 import {
   getPedidos,
@@ -11,9 +12,47 @@ import {
   ensureMeInSession,
 } from "../services/ordersService.js";
 import { getPlatillos } from "../services/menuService.js";
+import { getAuthToken } from "../services/apiConfig.js"; // ← añadido
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+/* =========================
+   AUTH: helpers + gate (añadidos)
+   ========================= */
+let IS_AUTH = false;
+
+function hasAuth() {
+  const t = getAuthToken?.();
+  return !!t && typeof t === "string";
+}
+function buildAuthHeaders(extra = {}) {
+  const h = { ...extra };
+  const t = getAuthToken?.();
+  if (t && !h.Authorization) h.Authorization = `Bearer ${t}`;
+  return h;
+}
+function renderAuthGate() {
+  const host = document.querySelector("main") || document.body;
+  host.innerHTML = `
+    <div class="p-6 grid place-items-center min-h-[50vh]">
+      <div class="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow p-6 text-center">
+        <div class="mx-auto w-14 h-14 rounded-full bg-blue-50 grid place-items-center mb-3">
+          <i class="fa-solid fa-lock text-blue-600 text-xl"></i>
+        </div>
+        <h2 class="text-lg font-semibold mb-1">Sesión requerida</h2>
+        <p class="text-gray-600 mb-4">Inicia sesión para ver y gestionar los pedidos.</p>
+        <a href="login.html"
+           class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition">
+          <i class="fa-solid fa-arrow-right-to-bracket"></i>
+          Iniciar sesión
+        </a>
+      </div>
+    </div>
+  `;
+}
+
+// ========================= (tu código original a partir de aquí) =========================
 
 let editingId = null;
 // idPlatillo -> idDetalle de las líneas originales del pedido
@@ -57,37 +96,25 @@ function upgradeSelect(nativeSelect, opts = {}) {
   const multiple = nativeSelect.hasAttribute("multiple") || !!opts.multiple;
   const placeholder = opts.placeholder || "Seleccione…";
 
-  // ===== estilos del portal (una sola vez) =====
   (function ensureFsPortalStyles() {
     if (document.getElementById("fs-portal-styles")) return;
     const st = document.createElement("style");
     st.id = "fs-portal-styles";
     st.textContent = `
       .fs-portal-panel{
-        position: fixed;
-        z-index: 9999;
-        top: -9999px; left: -9999px;
-        width: 280px;
-        max-height: 60vh;
-        overflow: auto;
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        background: #fff;
-        box-shadow: 0 24px 64px rgba(0,0,0,.20);
-        opacity: 0; transform: scale(.98);
-        pointer-events: none;
+        position: fixed; z-index: 9999; top: -9999px; left: -9999px; width: 280px; max-height: 60vh;
+        overflow: auto; border: 1px solid #e5e7eb; border-radius: 12px; background: #fff;
+        box-shadow: 0 24px 64px rgba(0,0,0,.20); opacity: 0; transform: scale(.98); pointer-events: none;
         transition: opacity .15s ease, transform .15s ease;
       }
       .fs-portal-panel.open{ opacity:1; transform: scale(1); pointer-events: auto; }
       .fs-portal-header{ padding: 8px; border-bottom: 1px solid #f1f5f9; }
       .fs-portal-search{
-        width:100%; border:1px solid #e5e7eb; border-radius:8px;
-        padding:6px 8px; font-size:14px; outline: none;
+        width:100%; border:1px solid #e5e7eb; border-radius:8px; padding:6px 8px; font-size:14px; outline: none;
       }
       .fs-portal-list{ padding: 8px; }
       .fs-portal-row{
-        width:100%; text-align:left; padding:8px 10px; border-radius:8px;
-        display:flex; align-items:center; gap:8px; border:1px solid transparent;
+        width:100%; text-align:left; padding:8px 10px; border-radius:8px; display:flex; align-items:center; gap:8px; border:1px solid transparent;
       }
       .fs-portal-row:hover{ background:#f9fafb; }
       .fs-portal-mark{ width:16px; flex:0 0 16px; color:#10b981; }
@@ -95,7 +122,6 @@ function upgradeSelect(nativeSelect, opts = {}) {
     document.head.appendChild(st);
   })();
 
-  // ===== estructura base alrededor del select =====
   const wrapper = document.createElement("div");
   wrapper.className = "fancy-select relative w-full";
   nativeSelect.insertAdjacentElement("afterend", wrapper);
@@ -127,7 +153,6 @@ function upgradeSelect(nativeSelect, opts = {}) {
   control.append(chips, caret);
   wrapper.appendChild(control);
 
-  // ====== PORTAL: panel se inserta en <body> y se posiciona sobre el control ======
   const panel = document.createElement("div");
   panel.className = "fs-portal-panel";
   const header = document.createElement("div");
@@ -144,7 +169,6 @@ function upgradeSelect(nativeSelect, opts = {}) {
   panel.append(header, list);
   document.body.appendChild(panel);
 
-  // ===== helpers =====
   function readOptions() {
     return Array.from(nativeSelect.options).map(o => ({
       value: o.value,
@@ -230,7 +254,6 @@ function upgradeSelect(nativeSelect, opts = {}) {
 
   function positionPanel() {
     const r = control.getBoundingClientRect();
-    // ancho del panel = ancho del control; posición bajo el control
     panel.style.width = `${Math.max(r.width, 200)}px`;
     panel.style.left = `${Math.round(r.left)}px`;
     panel.style.top = `${Math.round(r.bottom + 6)}px`;
@@ -253,8 +276,6 @@ function upgradeSelect(nativeSelect, opts = {}) {
     panel.classList.add("open");
     caret.style.transform = "rotate(180deg)";
     search.focus();
-
-    // re-posicionar mientras se desplaza o redimensiona
     window.addEventListener("scroll", onScrollResize, true);
     window.addEventListener("resize", onScrollResize, { passive: true });
   }
@@ -272,15 +293,9 @@ function upgradeSelect(nativeSelect, opts = {}) {
     if (panel.classList.contains("open")) positionPanel();
   }
 
-  function toggle() {
-    panel.classList.contains("open") ? close() : open();
-  }
+  function toggle() { panel.classList.contains("open") ? close() : open(); }
 
-  // eventos
-  control.addEventListener("click", (e) => {
-    e.preventDefault();
-    toggle();
-  });
+  control.addEventListener("click", (e) => { e.preventDefault(); toggle(); });
   search.addEventListener("input", () => renderList(search.value));
   document.addEventListener("click", (e) => {
     const inside = wrapper.contains(e.target) || panel.contains(e.target);
@@ -289,7 +304,6 @@ function upgradeSelect(nativeSelect, opts = {}) {
 
   nativeSelect.addEventListener("change", () => { syncControl(); renderList(search.value); });
 
-  // init
   syncControl();
   renderList();
 
@@ -306,9 +320,7 @@ function applyModernSkin() {
 
   const list = document.getElementById("orders-list");
   if (list) {
-    // quitamos cualquier grid previo
     list.classList.remove("md:grid-cols-2", "xl:grid-cols-3", "grid", "items-start", "orders-auto-grid");
-    // activamos masonry por columnas
     list.classList.add("orders-masonry");
     list.style.removeProperty("--card-min");
   }
@@ -361,17 +373,94 @@ function applyModernSkin() {
   document.head.appendChild(st);
 })();
 
-function ensureAlertHost() {
-  let host = document.getElementById("alerts-host");
-  if (!host) {
-    host = document.createElement("div");
-    host.id = "alerts-host";
-    host.setAttribute("aria-live", "polite");
-    host.className = "fixed top-4 right-4 z-50 space-y-3 pointer-events-none";
-    document.body.appendChild(host);
+// === UNIFICADOR DE ALERTAS (misma altura en todas las pantallas) ===
+(function(){
+  const STYLE_ID = "alerts-host-unified-style";
+
+  function ensureGlobalStyle(){
+    if (document.getElementById(STYLE_ID)) return;
+    const st = document.createElement("style");
+    st.id = STYLE_ID;
+    st.textContent = `
+      #alerts-host{
+        position: fixed !important;
+        top: var(--alerts-top, 20px) !important;   /* ALTURA UNIFICADA */
+        right: 16px !important;
+        left: auto !important;
+        bottom: auto !important;
+        margin: 0 !important;
+        z-index: 2147483647 !important;
+        pointer-events: none !important;
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 12px !important;
+      }
+      #alerts-host > * { pointer-events: auto !important; }
+    `;
+    document.head.appendChild(st);
   }
-  return host;
-}
+
+  function normalizeHost(){
+    let host = document.getElementById("alerts-host");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "alerts-host";
+      host.setAttribute("aria-live", "polite");
+      document.body.appendChild(host);
+    } else if (host.parentElement !== document.body) {
+      document.body.appendChild(host); // lo cuelga del <body>
+    }
+    // quita clases que alteren la posición
+    host.className = "";
+    // altura configurable globalmente con window.__ALERTS_TOP__
+    host.style.setProperty("--alerts-top", (window.__ALERTS_TOP__ || "20px"));
+    // fuerza estilos de posición
+    host.style.position = "fixed";
+    host.style.top      = "var(--alerts-top)";
+    host.style.right    = "16px";
+    host.style.left     = "auto";
+    host.style.bottom   = "auto";
+    host.style.margin   = "0";
+    host.style.zIndex   = "2147483647";
+    host.style.pointerEvents = "none";
+    return host;
+  }
+
+  let mo;
+  function observeHost(host){
+    if (mo) return;
+    mo = new MutationObserver(() => { normalizeHost(); });
+    mo.observe(host, { attributes: true, attributeFilter: ["class", "style"] });
+  }
+
+  // API para ajustar la altura global si quieres (px, rem, etc.)
+  window.installUnifiedAlerts = function(y){
+    window.__ALERTS_TOP__ = (typeof y === "number" ? `${y}px` : (y || "20px"));
+    ensureGlobalStyle();
+    const host = normalizeHost();
+    observeHost(host);
+    return host;
+  };
+
+  // Reemplazo central de ensureAlertHost usado por showAlert()
+  window.ensureAlertHost = function ensureAlertHost(){
+    ensureGlobalStyle();
+    const host = normalizeHost();
+    observeHost(host);
+    return host;
+  };
+
+  // Inicializa al cargar
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", () => installUnifiedAlerts(window.__ALERTS_TOP__ || "20px"));
+  } else {
+    installUnifiedAlerts(window.__ALERTS_TOP__ || "20px");
+  }
+})();
+
+
+
+
 function showAlert(type = "info", text = "", opts = {}) {
   const { timeout = 3500 } = opts;
   const host = ensureAlertHost();
@@ -438,7 +527,7 @@ function showConfirm({ title = "Confirmar", message = "", confirmText = "Aceptar
 
 async function tryFetchJson(url) {
   try {
-    const r = await fetch(url, { credentials: "include" });
+    const r = await fetch(url, { credentials: "include", headers: buildAuthHeaders() }); // ← auth
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return await r.json().catch(() => null);
   } catch (_) { return null; }
@@ -450,13 +539,11 @@ function getCookie(name) {
 }
 
 async function resolveLoggedInWaiter() {
-  // 1) cache de esta pantalla
   try {
     const cached = JSON.parse(sessionStorage.getItem("ord_waiter") || "null");
     if (cached && Number(cached.idEmpleado) > 0 && cached.username) return cached;
   } catch { }
 
-  // 2) cache anterior (si tú lo guardabas)
   try {
     const u = JSON.parse(sessionStorage.getItem("ord_user") || "null");
     if (u && (u.idEmpleado || (u.empleado && u.empleado.id))) {
@@ -472,11 +559,8 @@ async function resolveLoggedInWaiter() {
     }
   } catch { }
 
-  // 3) intenta endpoints comunes de "me"
   const API = "https://orderly-api-b53514e40ebd.herokuapp.com";
-  const ME_CANDIDATES = [
-    "/api/auth/me"
-  ];
+  const ME_CANDIDATES = ["/api/auth/me"];
   for (const path of ME_CANDIDATES) {
     const data = await tryFetchJson(`${API}${path}`);
     if (data) {
@@ -494,12 +578,10 @@ async function resolveLoggedInWaiter() {
         sessionStorage.setItem("ord_waiter", JSON.stringify(obj));
         return obj;
       }
-      // si solo trae email, lo usamos más abajo
       if (email) var meEmail = email;
     }
   }
 
-  // 4) intenta extraer email desde cookie JWT (si existe)
   let email = (typeof meEmail !== "undefined") ? meEmail : "";
   if (!email) {
     const token = getCookie("jwt") || getCookie("token") || getCookie("access_token") || getCookie("Authorization");
@@ -507,7 +589,6 @@ async function resolveLoggedInWaiter() {
     email = String(payload?.email ?? payload?.sub ?? payload?.user_email ?? "").trim();
   }
 
-  // 5) si tenemos email, buscamos el usuario para sacar idEmpleado/username
   if (email) {
     const users = await tryFetchJson(`${API}/apiUsuario/getDataUsuario?page=0&size=1000`);
     const list = Array.isArray(users?.content) ? users.content : (Array.isArray(users) ? users : []);
@@ -525,11 +606,8 @@ async function resolveLoggedInWaiter() {
       }
     }
   }
-
-  // 6) último recurso: nada encontrado
   return null;
 }
-
 
 function clearSnapshots() {
   localStorage.removeItem(K_CLIENTE);
@@ -554,15 +632,12 @@ function openOrderFormOverlay() {
   const form = document.getElementById("new-order-form");
   if (!form || !sheet) return;
 
-  // Guardamos el padre original para poder devolverlo
   if (!form._homeParent) {
     form._homeParent = form.parentElement;
-    form._homeNext = form.nextSibling; // para insertar en su posición original
+    form._homeNext = form.nextSibling;
   }
   sheet.appendChild(form);
   overlay.classList.add("open");
-
-  // Asegura foco/scroll al inicio del form
   form.scrollTop = 0;
   form.querySelector("input, select, textarea, button")?.focus?.();
 }
@@ -590,21 +665,16 @@ async function reloadOrdersList() {
   showLoader("Cargando pedidos…");
   container.innerHTML = "";
   try {
-    await cargarPedidosDeApi(container, agregarTarjetaPedido); // ya rehace masonry
-    ensureFilterBar(); // mantiene la barra
+    await cargarPedidosDeApi(container, agregarTarjetaPedido);
+    ensureFilterBar();
   } finally {
     hideLoader();
   }
 }
 
-
-
-// Evita que el viewport "salte" cuando cambia la altura
 function withScrollFreeze(fn) {
   const x = window.scrollX, y = window.scrollY;
-  try { fn(); } finally {
-    requestAnimationFrame(() => window.scrollTo(x, y));
-  }
+  try { fn(); } finally { requestAnimationFrame(() => window.scrollTo(x, y)); }
 }
 
 function throttle(fn, wait = 150) {
@@ -625,13 +695,7 @@ window.addEventListener('resize', recalcExpandedHeights);
 window.addEventListener('load', recalcExpandedHeights);
 
 /* =========================
-   Masonry por columnas (NO grid-auto-rows)
-   ========================= */
-/* =========================
-   Masonry por columnas (FLEX, sin reequilibrado automático)
-   ========================= */
-/* =========================
-   Masonry por columnas (GRID, sin scroll lateral)
+   Masonry por columnas (styles)
    ========================= */
 (function ensureMasonryStyles() {
   const ID = "orders-masonry-styles";
@@ -641,64 +705,33 @@ window.addEventListener('load', recalcExpandedHeights);
   const st = document.createElement("style");
   st.id = ID;
   st.textContent = `
-    /* Contenedor: grid de N columnas iguales, sin overflow horizontal */
     #orders-list.orders-masonry{
-      --col-count: 1;
-      --gap: 16px;
-      --card-min: 300px;   /* usado sólo para calcular N columnas */
-      display: grid;
-      grid-template-columns: repeat(var(--col-count), minmax(0, 1fr));
-      column-gap: var(--gap);
-      row-gap: 16px;
-      width: 100%;
-      max-width: 100%;
-      overflow-x: hidden;   /* ¡nada de scroll lateral! */
-      align-items: start;
+      --col-count: 1; --gap: 16px; --card-min: 300px;
+      display: grid; grid-template-columns: repeat(var(--col-count), minmax(0, 1fr));
+      column-gap: var(--gap); row-gap: 16px; width: 100%; max-width: 100%;
+      overflow-x: hidden; align-items: start;
     }
-    @media (min-width: 1400px){
-      #orders-list.orders-masonry{ --gap: 20px; --card-min: 340px; }
-    }
-    @media (max-width: 768px){
-      #orders-list.orders-masonry{ --gap: 14px; --card-min: 100%; } /* fuerza 1 col */
-    }
-
-    /* Cada columna es un stack vertical */
-    #orders-list.orders-masonry .m-col{
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      min-width: 0; /* evita desbordes por contenido */
-    }
-
-    /* Por seguridad: no permitir .o-card suelta en el grid raíz */
+    @media (min-width: 1400px){ #orders-list.orders-masonry{ --gap: 20px; --card-min: 340px; } }
+    @media (max-width: 768px){  #orders-list.orders-masonry{ --gap: 14px; --card-min: 100%; } }
+    #orders-list.orders-masonry .m-col{ display: flex; flex-direction: column; gap: 16px; min-width: 0; }
     #orders-list.orders-masonry > .o-card{ display:none !important; }
-
-    /* Animación del expandible (igual que antes) */
-    .o-extra{
-      overflow: hidden;
-      transition: max-height .32s ease, opacity .20s ease;
-      will-change: max-height;
-    }
+    .o-extra{ overflow: hidden; transition: max-height .32s ease, opacity .20s ease; will-change: max-height; }
     .o-extra.collapsed{ max-height:0; opacity:0; }
     .o-extra.expanded{ opacity:1; }
   `;
   document.head.appendChild(st);
 })();
 
-
-
-/* (ELIMINADO) — No usamos grid-auto-rows ni spans personalizados */
-
 /* =========================
    Colores / helpers
    ========================= */
 function accentForEstado(nombre) {
   const n = (nombre || "").toLowerCase();
-  if (n.includes("pend")) return "#F59E0B"; // amber
-  if (n.includes("prep") || n.includes("proces")) return "#3B82F6"; // blue
-  if (n.includes("entreg")) return "#10B981"; // emerald
-  if (n.includes("cancel") || n.includes("anul")) return "#EF4444"; // red
-  return "#6B7280"; // gray
+  if (n.includes("pend")) return "#F59E0B";
+  if (n.includes("prep") || n.includes("proces")) return "#3B82F6";
+  if (n.includes("entreg")) return "#10B981";
+  if (n.includes("cancel") || n.includes("anul")) return "#EF4444";
+  return "#6B7280";
 }
 
 function resetOrderForm() {
@@ -728,23 +761,19 @@ function getLockedSet() {
   try { return new Set(JSON.parse(localStorage.getItem(LOCK_KEY) || "[]")); } catch { return new Set(); }
 }
 function saveLockedSet(set) { localStorage.setItem(LOCK_KEY, JSON.stringify([...set])); }
-function lockMesaLocal(idMesa) {
-  const s = getLockedSet(); s.add(String(idMesa)); saveLockedSet(s);
-}
-function unlockMesaLocal(idMesa) {
-  const s = getLockedSet(); s.delete(String(idMesa)); saveLockedSet(s);
-}
+function lockMesaLocal(idMesa) { const s = getLockedSet(); s.add(String(idMesa)); saveLockedSet(s); }
+function unlockMesaLocal(idMesa) { const s = getLockedSet(); s.delete(String(idMesa)); saveLockedSet(s); }
 window.isMesaLockedByOrder = (idMesa) => getLockedSet().has(String(idMesa));
 
 // ---- API Mesa (best-effort; ajusta si tu backend difiere) ----
 const API_HOST = "https://orderly-api-b53514e40ebd.herokuapp.com";
 async function tryUpdateMesaEstado(idMesa, idEstadoMesa) {
   const url = `${API_HOST}/apiMesa/estado/${idMesa}/${idEstadoMesa}`;
-  const res = await fetch(url, { method: "PATCH", credentials: "include" });
+  const res = await fetch(url, { method: "PATCH", credentials: "include", headers: buildAuthHeaders() }); // ← auth
   return res.ok;
 }
-async function ocuparMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 2); } // Ocupada
-async function liberarMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 1); } // Disponible
+async function ocuparMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 2); }
+async function liberarMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 1); }
 
 /* =========================
    ESTADOS (dinámicos desde BD)
@@ -787,9 +816,7 @@ function nextEstadoId(currentId) {
 function getSeleccion() {
   try { return JSON.parse(sessionStorage.getItem(K_SEL) || "[]"); } catch { return []; }
 }
-function setSeleccion(v) {
-  sessionStorage.setItem(K_SEL, JSON.stringify(v || []));
-}
+function setSeleccion(v) { sessionStorage.setItem(K_SEL, JSON.stringify(v || [])); }
 
 /* =========================
    Snapshots del form
@@ -827,18 +854,10 @@ async function cargarCatalogos() {
 }
 
 /* =========================
-   Mesero (autocompletado + bloqueado)
+   Mesero (bloqueado con el usuario logueado)
    ========================= */
-// === MOSTRAR SOLO EL USUARIO LOGUEADO, BLOQUEADO ===
-// Reemplaza el select por un único valor bloqueado: el usuario logueado (username)
-// No consulta /apiEmpleado; usa /api/auth/me y lo deja bloqueado
-// =========================
-// Mesero (bloqueado con el usuario logueado)
-// =========================
 async function cargarEmpleados(waiterSelect) {
   if (!waiterSelect) return;
-
-  // Forzar siempre una lectura fresca del backend para evitar "quedarse" con la sesión anterior.
   const me = await ensureMeInSession({ forceNetwork: true });
 
   const label = me?.username || me?.correo || "Sesión no identificada";
@@ -851,22 +870,16 @@ async function cargarEmpleados(waiterSelect) {
   opt.selected = true;
   waiterSelect.appendChild(opt);
 
-  // Dejarlo bloqueado/readonly (accesible)
   waiterSelect.disabled = true;
   waiterSelect.title = "Se completa automáticamente con el usuario que inició sesión.";
   waiterSelect.className =
     "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 text-sm md:text-base bg-gray-100 shadow-sm cursor-not-allowed";
 
-  // Mantener el look del select "fancy" (etiqueta visible y deshabilitado)
   if (typeof upgradeSelect === "function") {
     upgradeSelect(waiterSelect, { placeholder: "Mesero" });
     waiterSelect._fancy?.sync?.();
   }
 }
-
-
-
-
 
 /* =========================
    Mesas (select con estado)
@@ -886,8 +899,7 @@ function nombreEstadoMesa(m) {
   const raw = (
     m.nomEstadoMesa ?? m.nomEstado ??
     (m.estadoMesa && (m.estadoMesa.nomEstado ?? m.estadoMesa.nombre ?? m.estadoMesa.estado)) ??
-    (m.estado && (m.estado.nomEstado ?? m.estado.nombre ?? m.estado.estado)) ??
-    m.estado ?? ""
+    (m.estado && (m.estado.nomEstado ?? m.estado.nombre ?? m.estado.estado)) ?? m.estado ?? ""
   ).toString().toLowerCase();
   if (raw.includes("dispon")) return "disponible";
   if (raw.includes("ocup")) return "ocupada";
@@ -899,12 +911,8 @@ function tituloEstado(s) {
   const t = String(s || "").toLowerCase();
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
-function idMesaFrom(m) {
-  return Number(m.id ?? m.Id ?? m.idMesa ?? m.IdMesa ?? m.codigo ?? m.numMesa ?? m.numero ?? NaN);
-}
-function nombreMesaFrom(m) {
-  return String(m?.nomMesa ?? m?.numero ?? m?.numMesa ?? idMesaFrom(m) ?? "?");
-}
+function idMesaFrom(m) { return Number(m.id ?? m.Id ?? m.idMesa ?? m.IdMesa ?? m.codigo ?? m.numMesa ?? m.numero ?? NaN); }
+function nombreMesaFrom(m) { return String(m?.nomMesa ?? m?.numero ?? m?.numMesa ?? idMesaFrom(m) ?? "?"); }
 function getEstadoMesaNormalized(m) {
   const idE = Number(
     m.idEstadoMesa ?? m.IdEstadoMesa ??
@@ -920,32 +928,23 @@ function getEstadoMesaNormalized(m) {
   const raw = (
     m.nomEstadoMesa ?? m.nomEstado ??
     (m.estadoMesa && (m.estadoMesa.nomEstado ?? m.estadoMesa.nombre ?? m.estadoMesa.estado)) ??
-    (m.estado && (m.estado.nomEstado ?? m.estado.nombre ?? m.estado.estado)) ??
-    m.estado ?? ""
+    (m.estado && (m.estado.nomEstado ?? m.estado.nombre ?? m.estado.estado)) ?? m.estado ?? ""
   ).toString().toLowerCase();
 
   if (raw.includes("dispon")) return "disponible";
   if (raw.includes("ocup")) return "ocupada";
   if (raw.includes("reserv")) return "reservada";
   if (raw.includes("limp")) return "limpieza";
-
   return "desconocido";
 }
 
-// Carga mesas con estado real
-// Carga mesas con estado real (robusto si pedidos/estados fallan)
-// Carga mesas con estado real (robusto si pedidos/estados fallan)
-// Carga mesas con estado real (robusto si pedidos/estados fallan)
 async function cargarMesasSelect(opts = {}) {
   const { allowCurrentId = null } = opts;
   const sel = document.getElementById("table-select");
   if (!sel) return;
 
   const norm = (s) => String(s ?? "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
   sel.className =
     "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base bg-white shadow-sm";
@@ -968,36 +967,32 @@ async function cargarMesasSelect(opts = {}) {
 
   let mesas = [], estadosMesa = [], pedidos = [], estadosPed = [];
 
-  // === Mesas ===
   try {
-    const r = await fetch(urlMesas, { credentials: "include" });
+    const r = await fetch(urlMesas, { credentials: "include", headers: buildAuthHeaders() });
     if (r.ok) {
       const d = await r.json().catch(() => ({}));
       mesas = Array.isArray(d?.content) ? d.content : (Array.isArray(d) ? d : []);
     }
   } catch (e) { console.error("[Mesas] Error obteniendo mesas:", e); }
 
-  // === Catálogo estados de mesa ===
   try {
-    const r = await fetch(urlEM, { credentials: "include" });
+    const r = await fetch(urlEM, { credentials: "include", headers: buildAuthHeaders() });
     if (r.ok) {
       const d = await r.json().catch(() => ({}));
       estadosMesa = Array.isArray(d?.content) ? d.content : (Array.isArray(d) ? d : []);
     }
   } catch (e) { console.error("[Mesas] Error obteniendo estados de mesa:", e); }
 
-  // === Catálogo estados de pedido ===
   try {
-    const r = await fetch(urlEP, { credentials: "include" });
+    const r = await fetch(urlEP, { credentials: "include", headers: buildAuthHeaders() });
     if (r.ok) {
       const d = await r.json().catch(() => ({}));
       estadosPed = Array.isArray(d?.content) ? d.content : (Array.isArray(d) ? d : []);
     }
   } catch (e) { console.error("[Mesas] Error obteniendo estados de pedido:", e); }
 
-  // === Pedidos (si falla, seguimos sin bloquear) ===
   try {
-    const r = await fetch(urlPed, { credentials: "include" });
+    const r = await fetch(urlPed, { credentials: "include", headers: buildAuthHeaders() });
     if (r.ok) {
       const d = await r.json().catch(() => ({}));
       pedidos = Array.isArray(d?.content) ? d.content : (Array.isArray(d) ? d : []);
@@ -1013,25 +1008,14 @@ async function cargarMesasSelect(opts = {}) {
   const MAP_ID_ESTADO_MESA_NOMBRE = new Map(estadosMesa.map(e => [getId(e), nomEstadoM(e)]));
   const MAP_ID_ESTADO_PED_NOMBRE = new Map(estadosPed.map(e => [getId(e), nomEstadoPed(e)]));
 
-  // Encontrar "Disponible" por nombre — robusto
   let idDisponible = null;
   for (const e of estadosMesa) {
     if (norm(nomEstadoM(e)).includes("dispon")) { idDisponible = getId(e); break; }
   }
 
-  if (idDisponible == null) {
-    console.warn("[Mesas] No se encontró estado 'Disponible' en el catálogo. Se mostrarán todas como no seleccionables.");
-  }
-
-  // === AQUÍ el cambio: "pagado" también se considera cerrado ===
   const esPedidoCerrado = (nombre) => {
     const s = norm(nombre);
-    return (
-      s.includes("final") ||
-      s.includes("cancel") ||
-      s.includes("anul") ||
-      s.includes("rechaz")
-    );
+    return (s.includes("final") || s.includes("cancel") || s.includes("anul") || s.includes("rechaz"));
   };
 
   const mesasConPedidoActivo = new Set(
@@ -1050,15 +1034,12 @@ async function cargarMesasSelect(opts = {}) {
     const idEst = idEstMesa(m);
     const nomEst = MAP_ID_ESTADO_MESA_NOMBRE.get(idEst) || "Desconocido";
 
-    // si hay pedido activo sobre esa mesa, fuerza "Ocupada"
     const estadoEfectivo = mesasConPedidoActivo.has(id) ? "Ocupada" : nomEst;
     let habilitada = (idDisponible != null) && (idEst === idDisponible) && !mesasConPedidoActivo.has(id);
     let etiqueta = `${nombre} — ${Cap(estadoEfectivo)}`;
 
     if (allowCurrentId && Number(allowCurrentId) === id && !habilitada) {
-      // al editar, permitir la mesa original aunque esté bloqueada
-      habilitada = true;
-      etiqueta = `${etiqueta} (actual)`;
+      habilitada = true; etiqueta = `${etiqueta} (actual)`;
     }
 
     const opt = new Option(etiqueta, String(id), false, false);
@@ -1076,23 +1057,14 @@ async function cargarMesasSelect(opts = {}) {
   upgradeSelect?.(sel, { placeholder: "Mesa" });
 }
 
-
-
-
 /* =========================
    Normalizador pedido UI
    ========================= */
 function fromApi(p) {
   const id = Number(p.id ?? p.Id ?? p.idPedido ?? p.ID);
-
-  // Tomar la fecha/hora de INICIO priorizando horaInicio
   const fecha = (
-    p.horaInicio ?? p.HoraInicio ??
-    p.fpedido ?? p.FPedido ??
-    p.fechaPedido ?? p.fecha ?? ""
+    p.horaInicio ?? p.HoraInicio ?? p.fpedido ?? p.FPedido ?? p.fechaPedido ?? p.fecha ?? ""
   ).toString();
-
-  // FIN si viene del backend
   const horaFin = (p.horaFin ?? p.HoraFin ?? p.horafin ?? null);
 
   const estadoId = Number(p.idEstadoPedido ?? p.IdEstadoPedido ?? p.estadoId ?? 0);
@@ -1128,8 +1100,8 @@ function fromApi(p) {
     Cliente: nombreCliente,
     Mesa: String(idMesa || ""),
     Mesero: "",
-    Hora: fecha,                // HORA_INICIO (ya con horaInicio si viene)
-    HoraFin: horaFin || null,   // HORA_FIN (puede venir null)
+    Hora: fecha,
+    HoraFin: horaFin || null,
     Estado: estadoNombre,
     Platillos: platillos,
     _subtotal: subtotal,
@@ -1143,9 +1115,6 @@ function fromApi(p) {
     Observaciones: (p.observaciones ?? p.Observaciones ?? "").toString()
   };
 }
-
-
-
 
 function getUniqueMesasFromCache() {
   const set = new Set(ORDERS_CACHE.map(o => Number(o.Mesa || o.idMesa || 0)).filter(Boolean));
@@ -1360,20 +1329,14 @@ function renderOrdersList(container, onAddCard) {
     return;
   }
 
-  // Guardamos para re-layout en resize
   container._masonryData = { items: list, onAddCard };
   layoutMasonryColumns(container, list, onAddCard);
   ensureMasonryResizeHandler(container);
 }
 
-
-
 /* =========================
    Masonry helpers (flex + columnas fijas)
    ========================= */
-
-// --- helpers mínimos para resolver el usuario logueado --- //
-
 function tryDecodeJwt(token) {
   try {
     const p = token.split('.')[1];
@@ -1383,7 +1346,6 @@ function tryDecodeJwt(token) {
 }
 
 function findJwtPayloadFromCookies() {
-  // busca cualquier cookie con pinta de JWT (con dos puntos)
   const parts = document.cookie.split(';').map(s => s.trim());
   for (const kv of parts) {
     const val = kv.split('=').slice(1).join('=');
@@ -1393,20 +1355,16 @@ function findJwtPayloadFromCookies() {
       if (payload) return payload;
     }
   }
-  // fallback a nombres típicos
   const cand = getCookie("jwt") || getCookie("token") || getCookie("access_token") || getCookie("Authorization");
   return cand ? tryDecodeJwt(cand) : null;
 }
 
-/** Devuelve { idEmpleado, username, email } o null */
 async function resolveLoggedInWaiterStrict() {
-  // cache local de esta pantalla
   try {
     const c = JSON.parse(sessionStorage.getItem("ord_waiter") || "null");
     if (c && Number(c.idEmpleado) > 0 && c.username) return c;
   } catch { }
 
-  // muchos setups guardan algo tipo "ord_user" al loguear
   try {
     const u = JSON.parse(sessionStorage.getItem("ord_user") || "null");
     if (u) {
@@ -1421,7 +1379,6 @@ async function resolveLoggedInWaiterStrict() {
     }
   } catch { }
 
-  // intenta extraer del JWT
   const payload = findJwtPayloadFromCookies();
   if (payload) {
     const email = String(payload.email ?? payload.correo ?? payload.sub ?? "").trim();
@@ -1435,35 +1392,25 @@ async function resolveLoggedInWaiterStrict() {
       return obj;
     }
   }
-
-  // sin fallback a catálogos (lo pediste explícito): si no hay sesión, null
   return null;
 }
 
-
-
 function computeColCount(container) {
-  // Calcula cuántas columnas caben según --card-min
   const styles = getComputedStyle(container);
   const minRaw = styles.getPropertyValue('--card-min').trim();
   let min;
-  if (minRaw.endsWith('%')) {
-    // 100% => 1 columna
-    min = container.clientWidth;
-  } else {
-    min = parseInt(minRaw) || 300;
-  }
+  if (minRaw.endsWith('%')) min = container.clientWidth;
+  else min = parseInt(minRaw) || 300;
   const w = container.clientWidth || container.offsetWidth || 0;
   return Math.max(1, Math.floor(w / Math.max(min, 1)));
 }
-
 
 function layoutMasonryColumns(container, items, onAddCard) {
   container.innerHTML = "";
   container.classList.add("orders-masonry");
 
   const colsCount = computeColCount(container);
-  container.style.setProperty('--col-count', String(colsCount)); // <- grid sin overflow
+  container.style.setProperty('--col-count', String(colsCount));
 
   const cols = [];
   const heights = [];
@@ -1478,9 +1425,7 @@ function layoutMasonryColumns(container, items, onAddCard) {
 
   items.forEach((pedido) => {
     let idxMin = 0;
-    for (let i = 1; i < cols.length; i++) {
-      if (heights[i] < heights[idxMin]) idxMin = i;
-    }
+    for (let i = 1; i < cols.length; i++) if (heights[i] < heights[idxMin]) idxMin = i;
     const col = cols[idxMin];
     const before = col.offsetHeight;
     onAddCard(pedido, col);
@@ -1488,15 +1433,8 @@ function layoutMasonryColumns(container, items, onAddCard) {
     heights[idxMin] += Math.max(0, after - before);
   });
 
-  requestAnimationFrame(() => {
-    typeof recalcExpandedHeights === "function" && recalcExpandedHeights();
-  });
+  requestAnimationFrame(() => { typeof recalcExpandedHeights === "function" && recalcExpandedHeights(); });
 }
-
-// Guarda en sessionStorage el usuario logueado { id, username, correo } leyendo /api/auth/me
-// Refresca SIEMPRE contra /api/auth/me (sin caché del navegador).
-
-
 
 function ensureMasonryResizeHandler(container) {
   if (container._masonryResizeAttached) return;
@@ -1514,8 +1452,6 @@ function ensureMasonryResizeHandler(container) {
   window.addEventListener("resize", relayout);
 }
 
-
-// === Helpers visuales para las tarjetas ===
 function fmtMoney(n) { return Number(n || 0).toFixed(2); }
 function fmtFechaCorta(s) {
   if (!s) return "-";
@@ -1526,18 +1462,11 @@ function fmtFechaCorta(s) {
   } catch { return String(s); }
 }
 function getEmpleadoNombre(idEmp) {
-  const me = (() => {
-    try { return JSON.parse(sessionStorage.getItem("ord_user") || "null"); } catch { return null; }
-  })();
-
-  if (me && Number(me.idEmpleado) === Number(idEmp) && (me.username || me.correo)) {
-    return me.username || me.correo;
-  }
-
+  const me = (() => { try { return JSON.parse(sessionStorage.getItem("ord_user") || "null"); } catch { return null; } })();
+  if (me && Number(me.idEmpleado) === Number(idEmp) && (me.username || me.correo)) return me.username || me.correo;
   const emp = MAP_EMPLEADOS.get(Number(idEmp));
   return emp?.nombre || (idEmp ? `Empleado #${idEmp}` : "—");
 }
-
 
 function badgeColorForEstado(nombre) {
   const n = (nombre || "").toLowerCase();
@@ -1663,7 +1592,6 @@ function ensureOrderOverlayStyles() {
   document.head.appendChild(st);
 }
 
-
 function agregarTarjetaPedido(pedido, container) {
   const estadoNombre = pedido.Estado || MAP_ESTADOS.get(Number(pedido.idEstadoPedido))?.nombre || "-";
   const badgeCls = badgeColorForEstado(estadoNombre);
@@ -1771,7 +1699,6 @@ function agregarTarjetaPedido(pedido, container) {
   const toggleBtn = card.querySelector(".o-toggle");
   const chev = toggleBtn.querySelector(".chev");
 
-  // Estado inicial: colapsada
   card.dataset.expanded = "0";
   extra.style.maxHeight = "0px";
 
@@ -1795,12 +1722,10 @@ function agregarTarjetaPedido(pedido, container) {
   };
 
   toggleBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     withScrollFreeze(() => setExpanded(card.dataset.expanded !== "1"));
   });
 
-  // Eliminar (con loader y recarga)
   card.querySelector(".btn-eliminar").addEventListener("click", async (ev) => {
     ev.stopPropagation();
     const ok = await showConfirm({
@@ -1830,13 +1755,11 @@ function agregarTarjetaPedido(pedido, container) {
     }
   });
 
-  // Editar
   card.querySelector(".btn-editar").addEventListener("click", (ev) => {
     ev.stopPropagation();
     abrirEdicionDesdeCard(pedido);
   });
 
-  // Select de estado (con loader y recarga)
   const selEstado = card.querySelector(`#sel-estado-${pedido.id}`);
   upgradeSelect?.(selEstado, { placeholder: "Estado" });
 
@@ -1883,13 +1806,6 @@ function agregarTarjetaPedido(pedido, container) {
     }
   });
 }
-
-
-
-
-
-
-
 
 /* =========================
    Edición
@@ -1956,10 +1872,8 @@ function abrirEdicionDesdeCard(pedido) {
   $("#orders-list").classList.add("hidden");
   $("#new-order-btn").classList.add("hidden");
 
-  // === Abrir como overlay encima de todo
   openOrderFormOverlay();
 }
-
 
 /* =========================
    Lista
@@ -1992,7 +1906,6 @@ async function cargarPedidosDeApi(container, onAddCard) {
   }
 }
 
-
 /* =========================
    Selección + Totales
    ========================= */
@@ -2001,17 +1914,9 @@ async function cargarPedidosDeApi(container, onAddCard) {
   const st = document.createElement("style");
   st.id = "orders-meta-responsive";
   st.textContent = `
-    #orders-list .o-meta{
-      display:grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap:.5rem;
-    }
-    #orders-list .o-meta .estado-cell{
-      grid-column: span 2;
-    }
-    @media (min-width: 920px){
-      #orders-list .o-meta .estado-cell{ grid-column: auto; }
-    }
+    #orders-list .o-meta{ display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap:.5rem; }
+    #orders-list .o-meta .estado-cell{ grid-column: span 2; }
+    @media (min-width: 920px){ #orders-list .o-meta .estado-cell{ grid-column: auto; } }
     #orders-list .o-meta .fancy-select{ display:block; width:100%; min-width:0; }
     #orders-list .o-meta .fancy-select .fs-control{ min-height:44px; width:100%; }
     #orders-list .o-meta select{ width:100%; min-width:0; }
@@ -2109,7 +2014,7 @@ function renderSeleccionUI() {
 }
 
 /* =========================
-   Payloads + Validación — UN payload con items[]
+   Payloads + Validación
    ========================= */
 function buildPayloadsFromSelection() {
   const seleccion = getSeleccion();
@@ -2189,20 +2094,16 @@ function buildPayloadsFromSelection() {
 
   const observaciones = ($("#order-notes")?.value || "").trim() || "Sin observaciones";
 
-  // === CAMBIO CLAVE: fecha en ISO local (sirve para LocalDateTime) ===
   const FPedidoISO = formatDateTimeForApi(new Date());
-  // Si tu DTO fuera LocalDate, podrías usar: const FPedidoISO = todayISODate();
 
-  // Devolvemos FPedido en mayúscula y, por compatibilidad,
-  // añadimos aliases que algunos DTO usan (el backend ignora los desconocidos).
   return {
     totalPedido: Number(total.toFixed(2)),
     subtotal: Number(subtotal.toFixed(2)),
     propina: Number(propina.toFixed(2)),
-    FPedido: FPedidoISO,           
-    fpedido: FPedidoISO,           
+    FPedido: FPedidoISO,
+    fpedido: FPedidoISO,
     fechaPedido: FPedidoISO,
-    horaInicio: FPedidoISO,       
+    horaInicio: FPedidoISO,
     items,
     nombreCliente,
     observaciones,
@@ -2211,8 +2112,6 @@ function buildPayloadsFromSelection() {
     idEstadoPedido
   };
 }
-
-
 
 /* =========================
    Crear / Actualizar
@@ -2226,90 +2125,53 @@ async function crearPedidoDesdeSeleccion() {
 
   if (idMesa) {
     const nombreEstado = (MAP_ESTADOS.get(Number(idEstado))?.nombre || "").toLowerCase();
-    const cerrado = nombreEstado.includes("final") ||
-      nombreEstado.includes("cancel") ||
-      nombreEstado.includes("anul") ||
-      nombreEstado.includes("rechaz");
-    if (cerrado) {
-      await liberarMesa(idMesa);
-    } else {
-      await ocuparMesa(idMesa);
-    }
+    const cerrado = nombreEstado.includes("final") || nombreEstado.includes("cancel") || nombreEstado.includes("anul") || nombreEstado.includes("rechaz");
+    if (cerrado) await liberarMesa(idMesa);
+    else await ocuparMesa(idMesa);
   }
 }
-
 
 async function actualizarPedido(editId) {
   if (!Number.isFinite(editId)) throw new Error("ID inválido para actualizar.");
 
-  const body = buildPayloadsFromSelection(); // trae idMesa, idEstadoPedido, items, etc.
+  const body = buildPayloadsFromSelection();
   await updatePedido(editId, body);
 
   const mesaAntes   = Number(editingOriginalMesaId || 0);
   const nuevaMesaId = Number(body.idMesa || 0);
   const nombreEstado = (MAP_ESTADOS.get(Number(body.idEstadoPedido))?.nombre || "").toLowerCase();
-  const cerrado = nombreEstado.includes("final")
-               || nombreEstado.includes("cancel")
-               || nombreEstado.includes("anul")
-               || nombreEstado.includes("rechaz");
+  const cerrado = nombreEstado.includes("final") || nombreEstado.includes("cancel") || nombreEstado.includes("anul") || nombreEstado.includes("rechaz");
 
-  // Si cambió de mesa, liberar la anterior
-  if (mesaAntes && nuevaMesaId && mesaAntes !== nuevaMesaId) {
-    try { await liberarMesa(mesaAntes); } catch {}
-  }
+  if (mesaAntes && nuevaMesaId && mesaAntes !== nuevaMesaId) { try { await liberarMesa(mesaAntes); } catch {} }
+  if (nuevaMesaId) { if (cerrado) { try { await liberarMesa(nuevaMesaId); } catch {} } else { try { await ocuparMesa(nuevaMesaId); } catch {} } }
 
-  // Regla de ocupada/libre según estado (sin IDs mágicos)
-  if (nuevaMesaId) {
-    if (cerrado) { try { await liberarMesa(nuevaMesaId); } catch {} }
-    else         { try { await ocuparMesa(nuevaMesaId);  } catch {} }
-  }
-
-  // Limpieza de estado de edición
   editingOriginalMesaId = null;
   editingOriginalPlatillos = new Set();
   editingOriginalLinesByPlatillo = new Map();
   editingMaxIdDetalle = 0;
 }
 
-
 /* =========================
-   LOADER GLOBAL (overlay con mensajes)
+   LOADER GLOBAL
    ========================= */
 let LOADER_COUNT = 0;
-
 function ensureLoaderHost() {
   let host = document.getElementById("global-loader");
   if (host) return host;
-
-  // estilos del loader (una sola vez)
   if (!document.getElementById("global-loader-styles")) {
     const st = document.createElement("style");
     st.id = "global-loader-styles";
     st.textContent = `
-      #global-loader{
-        position: fixed; inset: 0; z-index: 99999; display: none;
-        align-items: center; justify-content: center;
-        background: rgba(0,0,0,.35); backdrop-filter: blur(1.5px);
-      }
+      #global-loader{ position: fixed; inset: 0; z-index: 99999; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.35); backdrop-filter: blur(1.5px); }
       #global-loader.open{ display:flex; }
-      #global-loader .panel{
-        min-width: 260px; max-width: 90vw;
-        background:#fff; color:#111; border-radius:14px; border:1px solid #e5e7eb;
-        box-shadow: 0 24px 64px rgba(0,0,0,.25);
-        padding:16px 18px; display:flex; align-items:center; gap:12px;
-        animation: glfade .18s ease;
-      }
+      #global-loader .panel{ min-width: 260px; max-width: 90vw; background:#fff; color:#111; border-radius:14px; border:1px solid #e5e7eb; box-shadow: 0 24px 64px rgba(0,0,0,.25); padding:16px 18px; display:flex; align-items:center; gap:12px; animation: glfade .18s ease; }
       #global-loader .msg{ font-size:.95rem; font-weight:600; }
-      #global-loader .spinner{
-        width:22px; height:22px; border-radius:50%;
-        border:3px solid #e5e7eb; border-top-color:#2563EB; animation: spin 1s linear infinite;
-      }
+      #global-loader .spinner{ width:22px; height:22px; border-radius:50%; border:3px solid #e5e7eb; border-top-color:#2563EB; animation: spin 1s linear infinite; }
       @keyframes spin{ to{ transform: rotate(360deg); } }
       @keyframes glfade{ from{ opacity:0; transform: translateY(6px) } to{ opacity:1; transform:none } }
     `;
     document.head.appendChild(st);
   }
-
   host = document.createElement("div");
   host.id = "global-loader";
   host.setAttribute("role", "status");
@@ -2322,7 +2184,6 @@ function ensureLoaderHost() {
   document.body.appendChild(host);
   return host;
 }
-
 function showLoader(message = "Cargando…") {
   const host = ensureLoaderHost();
   const msg = host.querySelector("#global-loader-msg");
@@ -2330,19 +2191,28 @@ function showLoader(message = "Cargando…") {
   LOADER_COUNT++;
   host.classList.add("open");
 }
-
 function hideLoader() {
   const host = ensureLoaderHost();
   LOADER_COUNT = Math.max(0, LOADER_COUNT - 1);
   if (LOADER_COUNT === 0) host.classList.remove("open");
 }
 
-
-
-
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
+  // ====== AUTH GATE (añadido) ======
+  IS_AUTH = hasAuth();
+  if (!IS_AUTH) {
+    renderAuthGate();
+    window.addEventListener("storage", (e) => {
+      if (e.key === "authToken") {
+        IS_AUTH = hasAuth();
+        if (IS_AUTH) location.reload();
+      }
+    });
+    return;
+  }
+
   ensureOrderOverlayStyles();
 
   const ordersList = $("#orders-list");
@@ -2355,16 +2225,14 @@ async function init() {
   const waiterSelect = $("#waiter-select");
   const tableSelect = $("#table-select");
 
-  // 1) Catálogos y lista de pedidos (con loader)
   showLoader("Cargando pedidos…");
-  await cargarCatalogos(); // estados + platillos
+  await cargarCatalogos();
   await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
   await cargarEmpleados(waiterSelect);
   await cargarMesasSelect();
   await ensureMeInSession({ forceNetwork: true });
   hideLoader();
 
-  // 3) Abrir “nuevo pedido”
   newOrderBtn?.addEventListener("click", () => {
     document.getElementById("orders-filters")?.classList.add("hidden");
 
@@ -2384,11 +2252,9 @@ async function init() {
     cargarEmpleados(waiterSelect);
     cargarMesasSelect();
 
-    // === Abrir como overlay encima de todo
     openOrderFormOverlay();
   });
 
-  // 4) Volver a la lista / cerrar overlay
   backToOrdersBtn?.addEventListener("click", () => {
     document.getElementById("orders-filters")?.classList.remove("hidden");
 
@@ -2406,11 +2272,9 @@ async function init() {
     const saveBtn = $("#save-order-btn");
     if (saveBtn) saveBtn.textContent = "Guardar pedido";
 
-    // Cerrar overlay
     closeOrderFormOverlay();
   });
 
-  // 5) Ir a seleccionar platillos (loader mientras abre el menú)
   addDishesBtn?.addEventListener("click", () => {
     saveFormSnapshot();
     sessionStorage.setItem(K_OPEN_FORM, "1");
@@ -2423,27 +2287,17 @@ async function init() {
 
     const back = (location.pathname.split("/").pop() || "orders.html") + "#new";
     showLoader("Cargando platillos…");
-    // pequeña espera para que se vea el loader antes de navegar
-    setTimeout(() => {
-      window.location.href = `menu.html?select=1&back=${encodeURIComponent(back)}`;
-    }, 90);
+    setTimeout(() => { window.location.href = `menu.html?select=1&back=${encodeURIComponent(back)}`; }, 90);
   });
 
-  // 6) Guardar (crear/actualizar) + recargar lista + cerrar overlay (con loaders)
   saveOrderBtn?.addEventListener("click", async (e) => {
     e.preventDefault();
     try {
       if (!ESTADOS_ORDER.length) await cargarEstadosYSelect();
-
-      // Loader: agregando / actualizando
       showLoader(editingId == null ? "Agregando un pedido…" : "Actualizando pedido…");
 
-      if (editingId == null) {
-        await crearPedidoDesdeSeleccion();
-      } else {
-        await actualizarPedido(editingId);
-        editingId = null;
-      }
+      if (editingId == null) await crearPedidoDesdeSeleccion();
+      else { await actualizarPedido(editingId); editingId = null; }
       hideLoader();
 
       sessionStorage.removeItem(K_EDIT_ID);
@@ -2453,11 +2307,8 @@ async function init() {
       editingOriginalPlatillos = new Set();
 
       resetOrderForm();
-
-      // Cerrar overlay primero
       closeOrderFormOverlay();
 
-      // Mostrar loader mientras recargamos tabla y select de mesas
       showLoader("Cargando la tabla…");
       newOrderForm.classList.add("hidden");
       ordersList.classList.remove("hidden");
@@ -2470,16 +2321,19 @@ async function init() {
       showAlert("success", "Operación realizada correctamente");
     } catch (err) {
       hideLoader();
-      if (err && err.message !== "VALIDATION") {
-        showAlert("error", err.message || "No se pudo guardar el pedido");
-      }
+      if (err && err.message !== "VALIDATION") showAlert("error", err.message || "No se pudo guardar el pedido");
       console.error(err);
     }
   });
 
-  // 7) Reapertura automática del formulario (al volver de menu.html o #new) con loader
   if (sessionStorage.getItem(K_OPEN_FORM) === "1" || location.hash === "#new") {
     document.getElementById("orders-filters")?.classList.add("hidden");
+
+    const newOrderForm = $("#new-order-form");
+    const ordersList = $("#orders-list");
+    const newOrderBtn = $("#new-order-btn");
+    const waiterSelect = $("#waiter-select");
+    const tableSelect = $("#table-select");
 
     newOrderForm.classList.remove("hidden");
     ordersList.classList.add("hidden");
@@ -2514,21 +2368,24 @@ async function init() {
     }
 
     sessionStorage.removeItem(K_OPEN_FORM);
-
-    // Abrir como overlay al reaparecer el formulario
     openOrderFormOverlay();
     hideLoader();
   } else {
     renderSeleccionUI();
   }
 
-  // 8) Skin (igual)
   applyModernSkin();
+
+  // Watchdog: si se borra token en caliente, mostramos gate
+  setInterval(() => {
+    const ok = hasAuth();
+    if (IS_AUTH && !ok) {
+      IS_AUTH = false;
+      renderAuthGate();
+    }
+  }, 1500);
 }
 
-
-
-// Marca un campo inválido visualmente
 function markInvalid(id) {
   const el = document.getElementById(id);
   if (!el) return;
@@ -2536,8 +2393,6 @@ function markInvalid(id) {
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   setTimeout(() => el.classList.remove("ring-2", "ring-red-500"), 1500);
 }
-
-// Fecha/hora local en formato ISO sin milisegundos, ideal para LocalDateTime en el backend
 function formatDateTimeForApi(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   const yyyy = d.getFullYear();
@@ -2546,11 +2401,8 @@ function formatDateTimeForApi(d = new Date()) {
   const hh = pad(d.getHours());
   const mi = pad(d.getMinutes());
   const ss = pad(d.getSeconds());
-  // "2025-09-24T12:34:56"
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}`;
 }
-
-// Fecha solo día (por si tu DTO fuera LocalDate)
 function todayISODate() {
   const d = new Date();
   const mm = String(d.getMonth() + 1).padStart(2, "0");

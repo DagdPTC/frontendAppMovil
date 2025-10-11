@@ -1,5 +1,33 @@
 // js/controllers/menuController.js
-import { getCategorias, getPlatillos } from "../services/menuService.js";
+import { getCategorias, getPlatillos, getSessionUser, isAuthError } from "../services/menuService.js";
+
+function renderAuthGate() {
+  // busca el contenedor principal de la vista
+  const host =
+    document.querySelector("main") ||
+    document.querySelector(".main-content") ||
+    document.body;
+
+  if (!host) return;
+
+  host.innerHTML = `
+    <div class="p-6 grid place-items-center min-h-[60vh]">
+      <div class="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow p-6 text-center">
+        <div class="mx-auto w-14 h-14 rounded-full bg-blue-50 grid place-items-center mb-3">
+          <i class="fa-solid fa-lock text-blue-600 text-xl"></i>
+        </div>
+        <h2 class="text-lg font-semibold mb-1">Sesión requerida</h2>
+        <p class="text-gray-600 mb-4">Inicia sesión para ver y gestionar el menú.</p>
+        <a href="login.html"
+           class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition">
+          <i class="fa-solid fa-arrow-right-to-bracket"></i>
+          Iniciar sesión
+        </a>
+      </div>
+    </div>
+  `;
+}
+
 
 const $  = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -37,33 +65,53 @@ let CAT_BY_ID = new Map();
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
+  // 1) VALIDAR SESIÓN ANTES DE MONTAR UI
+  const me = await getSessionUser().catch(() => null);
+  if (!me) {
+    renderAuthGate();
+    return; // no seguimos montando nada
+  }
+
+  // 2) Listeners básicos de la vista
   $("#filter-button")?.addEventListener("click", () => {
     $("#category-filter")?.classList.toggle("hidden");
   });
   $("#search-dishes")?.addEventListener("input", onSearch);
 
+  // 3) Skeleton mientras carga
   showSkeleton();
 
-  const [dishes, cats] = await Promise.all([ getPlatillos(0), getCategorias(0) ]);
-  PLATILLOS  = dishes;
-  CATEGORIAS = cats.map(c => ({ ...c, slug: slugify(c.nombre) }));
-  CAT_BY_ID  = new Map(CATEGORIAS.map(c => [c.id, c]));
+  // 4) Cargar datos
+  try {
+    const [dishes, cats] = await Promise.all([getPlatillos(0), getCategorias(0)]);
+    PLATILLOS  = dishes;
+    CATEGORIAS = cats.map(c => ({ ...c, slug: slugify(c.nombre) }));
+    CAT_BY_ID  = new Map(CATEGORIAS.map(c => [c.id, c]));
+  } catch (err) {
+    if (isAuthError(err)) { renderAuthGate(); return; }
+    // Si es otro error, muestra “sin platillos” pero no rompas la vista
+    console.error("Error cargando menú:", err);
+    $("#dishes-container").innerHTML = `<div class="col-span-2 text-center text-gray-500 py-6">No fue posible cargar el menú.</div>`;
+    return;
+  }
 
+  // 5) Render UI
   buildCategoryButtons();
   renderDishes(PLATILLOS);
   animateCards();
 
-  // Cortafuegos global: si alguna <img> falla, se cambia una sola vez y listo
+  // 6) Cortafuegos global para <img> rotas
   window.addEventListener("error", (ev) => {
     const el = ev.target;
     if (el && el.tagName === "IMG" && !el.dataset.fallbackApplied) {
       el.dataset.fallbackApplied = "1";
       el.onerror = null;
-      el.removeAttribute("srcset"); // evita que srcset vuelva a disparar requests
+      el.removeAttribute("srcset");
       el.src = FALLBACK;
     }
   }, true);
 }
+
 
 function showSkeleton() {
   const cont = $("#dishes-container");

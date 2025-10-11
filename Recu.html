@@ -107,7 +107,7 @@
         </p>
 
         <!-- Formulario (IDs intactos) -->
-        <form id="recuForm" class="space-y-4">
+        <form id="recuForm" class="space-y-4" novalidate>
           <div class="group">
             <div class="field-row relative">
               <span class="input-icon" aria-hidden="true">
@@ -119,10 +119,10 @@
                 </svg>
               </span>
 
-              <!-- Mismo input de login -->
-              <input type="email" required
+              <!-- CAMBIO: agregado id="email" -->
+              <input id="email" type="email" required
                 class="input-field w-full pl-11 pr-4 py-3 rounded-xl bg-slate-50/80 border border-slate-200 focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/15 transition-all"
-                placeholder="Correo electrónico" />
+                placeholder="Correo electrónico" autocomplete="email" />
             </div>
           </div>
 
