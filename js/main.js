@@ -1,527 +1,254 @@
-  // ==========================
-  // main.js (COMPLETO con autenticación y logout)
-  // ==========================
+import { API, fetchJSON, setAuthToken, getAuthToken } from "./services/apiConfig.js";
 
-  // ====== IMPORTAR desde apiConfig.js ======
-  import { API_BASE, fetchJSON, getAuthToken, setAuthToken } from './services/apiConfig.js';
+const $ = (s, r = document) => r.querySelector(s);
 
-  function hasAuth() {
-    const t = getAuthToken?.();
-    return !!t && typeof t === 'string';
+/* ====== helpers de alerta (mismo look & feel de pedidos) ====== */
+function ensureAlertHost() {
+  let host = document.getElementById("alerts-host");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "alerts-host";
+    host.setAttribute("aria-live", "polite");
+    host.className = "fixed top-4 right-4 z-50 space-y-3 pointer-events-none";
+    document.body.appendChild(host);
   }
+  return host;
+}
 
-  function renderAuthGate() {
-    // Dibuja el card en el <main> (si no existe usa body)
-    const host =
-      document.querySelector("main") ||
-      document.querySelector("#app") ||
-      document.body;
+function showAlert(type = "info", text = "", opts = {}) {
+  const { timeout = 3500 } = opts;
+  const host = ensureAlertHost();
+  const wrap = document.createElement("div");
+  const color = { info: "bg-blue-500", error: "bg-red-500", success: "bg-green-600" }[type] || "bg-blue-500";
 
-    if (!host) return;
+  wrap.className =
+    `pointer-events-auto rounded-xl px-4 py-3 shadow-lg text-white flex items-center gap-3 w-[min(92vw,380px)] ${color}`;
+  wrap.innerHTML = `
+    <div class="font-medium">${text}</div>
+    <button class="ml-auto opacity-80 hover:opacity-100 focus:outline-none">✕</button>
+  `;
+  host.appendChild(wrap);
 
-    host.innerHTML = `
-      <div class="p-6 grid place-items-center min-h-[60vh]">
-        <div class="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow p-6 text-center">
-          <div class="mx-auto w-14 h-14 rounded-full bg-blue-50 grid place-items-center mb-3">
-            <i class="fa-solid fa-lock text-blue-600 text-xl"></i>
-          </div>
-          <h2 class="text-lg font-semibold mb-1">Sesión requerida</h2>
-          <p class="text-gray-600 mb-4">Inicia sesión para ver y gestionar el panel.</p>
-          <a href="login.html"
-            class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition">
-            <i class="fa-solid fa-arrow-right-to-bracket"></i>
-            Iniciar sesión
-          </a>
-        </div>
-      </div>
-    `;
-  }
-
-  /** Devuelve true si bloqueó la vista (no hay sesión) */
-  function enforceAuthGateEarly() {
-    if (!hasAuth()) {
-      renderAuthGate();
-      // Si el usuario inicia sesión en otra pestaña, recarga para desbloquear
-      window.addEventListener("storage", (e) => {
-        if (e.key === "authToken" && getAuthToken()) location.reload();
-      });
-      return true;
-    }
-    return false;
-  }
-
-  // Endpoint correcto según tu AuthController
-  const ME_ENDPOINT = `${API_BASE}/api/auth/me`;
-
-  // ==========================
-  // FUNCIONES DE AUTENTICACIÓN
-  // ==========================
-
-  // ELIMINADA: Ya no necesitamos obtenerHeaders() aquí
-  // La función fetchJSON de apiConfig.js ya maneja todo
-
-  // Manejo global de errores de autenticación
-  async function manejarErrorAuth(error, response) {
-    if (response && (response.status === 401 || response.status === 403)) {
-      console.warn('Sesión expirada o no autorizada. Redirigiendo al login...');
-      localStorage.removeItem('orderly_me_cache');
-      setAuthToken(null); // Limpia el token usando apiConfig
-      window.location.href = 'login.html';
-      return true;
-    }
-    return false;
-  }
-
-  // Función para reiniciar el sistema si es un nuevo día
-  function reiniciarSistemaSiEsNuevoDia() {
-    const hoy = new Date().toDateString();
-    const ultimaFecha = localStorage.getItem('ultimaFechaSistema');
-
-    if (ultimaFecha !== hoy) {
-      const nuevasMesas = Array.from({ length: 12 }, (_, i) => ({
-        number: i + 1,
-        status: 'disponible'
-      }));
-      localStorage.setItem('estadoMesas', JSON.stringify(nuevasMesas));
-      localStorage.removeItem('pedidosGuardados');
-      localStorage.setItem('pedidosHoy', '0');
-      localStorage.setItem('ultimaFechaSistema', hoy);
-      console.log('Sistema reiniciado automáticamente por nuevo día.');
-    }
-  }
-
-  // ==========================
-  // Helper de fechas
-  // ==========================
-  function fmtFechaYMD(ymd) {
-    if (!ymd || typeof ymd !== 'string') return null;
-    const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (m) {
-      const [, y, mm, dd] = m;
-      return `${dd}/${mm}/${y}`;
-    }
-    const d = new Date(ymd);
-    return isNaN(d) ? null : d.toLocaleDateString('es-ES');
-  }
-
-  // ==========================
-  // ESTADÍSTICAS DE MESAS
-  // ==========================
-  async function obtenerEstadisticasMesas() {
+  const close = () => {
     try {
-      // Ahora usa fetchJSON que ya maneja los headers con token
-      const mesasData = await fetchJSON(`${API_BASE}/apiMesa/getDataMesa`, {
-        method: 'GET'
-      });
+      wrap.style.transition = "opacity .2s ease, transform .2s ease";
+      wrap.style.opacity = "0";
+      wrap.style.transform = "translateY(-6px)";
+      setTimeout(() => wrap.remove(), 180);
+    } catch { wrap.remove(); }
+  };
 
-      const estadosData = await fetchJSON(`${API_BASE}/apiEstadoMesa/getDataEstadoMesa`, {
-        method: 'GET'
-      });
+  wrap.querySelector("button")?.addEventListener("click", close);
+  if (timeout > 0) setTimeout(close, timeout);
+}
 
-      if (mesasData && Array.isArray(mesasData.content) && 
-          estadosData && Array.isArray(estadosData.content)) {
-        const mesas = mesasData.content;
-        const estadosMesas = estadosData.content;
-        const totalMesas = mesas.length;
-        let mesasDisponibles = 0;
+/* ====== animación de éxito ====== */
+function playLoginSuccessFxFull() {
+  const header = document.getElementById("loginHeader");
+  const headerTexts = document.getElementById("loginHeaderTexts");
+  const card = document.getElementById("loginCard");
+  const btn = document.querySelector(".btn-login");
 
-        mesas.forEach(mesa => {
-          const estadoMesa = estadosMesas.find(estado => estado.id === mesa.idEstadoMesa);
-          if (estadoMesa && estadoMesa.estadoMesa === 'Disponible') {
-            mesasDisponibles++;
-          }
-        });
+  // fade-out primero
+  headerTexts?.classList.add("fade-out");
+  card?.classList.add("fade-out");
+  if (btn) { btn.disabled = true; btn.style.pointerEvents = "none"; }
 
-        const contador = document.getElementById('mesas-disponibles');
-        if (contador) {
-          contador.textContent = `${mesasDisponibles}/${totalMesas}`;
-        }
-      } else {
-        console.error('Las mesas o estados no están en el formato esperado');
-      }
-    } catch (error) {
-      console.error('Error en la solicitud de estadísticas de mesas:', error);
-      if (error.message.includes('401') || error.message.includes('403')) {
-        window.location.href = 'login.html';
-      }
-    }
+  // luego shrink del header
+  setTimeout(() => { header?.classList.add("shrink-animation"); }, 120);
+}
+
+function validateGmailAddress(raw) {
+  const email = (raw || "").trim();
+  if (!email) return { ok: false, reason: "Ingresa tu correo." };
+
+  const parts = email.toLowerCase().split("@");
+  if (parts.length !== 2) return { ok: false, reason: "Correo inválido." };
+
+  const [local, domain] = parts;
+
+  // Solo Gmail
+  if (!/^(gmail\.com|googlemail\.com)$/.test(domain)) {
+    return { ok: false, reason: "Debe ser un correo @gmail.com." };
   }
 
-  // ==========================
-  // ESTADÍSTICAS DE PEDIDOS
-  // ==========================
-  async function obtenerEstadisticasPedidos() {
-    try {
-      const data = await fetchJSON(`${API_BASE}/apiPedido/getDataPedido`, {
-        method: 'GET'
-      });
-
-      if (data && Array.isArray(data.content)) {
-        const pedidos = data.content;
-        const totalPedidos = pedidos.length;
-        const contador = document.getElementById('pedidos-hoy');
-        if (contador) {
-          contador.textContent = totalPedidos;
-        }
-      } else {
-        console.error('Los pedidos no están en el formato esperado');
-      }
-    } catch (error) {
-      console.error('Error en la solicitud de estadísticas de pedidos:', error);
-      if (error.message.includes('401') || error.message.includes('403')) {
-        window.location.href = 'login.html';
-      }
-    }
+  // Reglas típicas de Gmail para el usuario
+  if (!/^[a-z0-9][a-z0-9.+-]*[a-z0-9]$/i.test(local)) {
+    return { ok: false, reason: "Solo letras, números, puntos, + o - en el usuario." };
+  }
+  if (local.startsWith(".") || local.endsWith(".") || local.includes("..")) {
+    return { ok: false, reason: "Gmail no permite empezar/terminar con punto ni tener '..'." };
   }
 
-  // ==========================
-  // OFERTAS DEL CARRUSEL
-  // ==========================
-  async function obtenerOfertas() {
+  // Gmail ignora los puntos: exigimos al menos 6 caracteres “reales” sin puntos (evita correos obviamente falsos).
+  const coreLen = local.replace(/\./g, "").length;
+  if (coreLen < 6) {
+    return { ok: false, reason: "El usuario de Gmail debe tener al menos 6 caracteres (sin contar puntos)." };
+  }
+
+  // Canoniza a gmail.com (aceptamos googlemail.com como alias)
+  const normalized = `${local}@gmail.com`;
+  return { ok: true, value: normalized };
+}
+
+// === Helpers de rol Mesero ===
+// === Helpers de rol permitido: Admin (1) o Mesero (2) ===
+function normalizeRoleFromMe(me) {
+  const out = { id: undefined, name: undefined };
+  if (!me) return out;
+
+  const tryPick = (r) => {
+    if (r == null) return;
+    if (typeof r === "number" || (typeof r === "string" && /^\d+$/.test(r))) {
+      out.id = Number(r); return;
+    }
+    if (typeof r === "string") { out.name = r; return; }
+    if (Array.isArray(r)) {
+      for (const x of r) {
+        const id = Number(x?.idRol ?? x?.id ?? x?.Id);
+        const name = String(x?.nombre ?? x?.name ?? "").toLowerCase();
+        if (!Number.isNaN(id)) out.id = id;
+        if (name) out.name = name;
+        if (out.id === 1 || out.id === 2 || (out.name && (out.name.includes("meser") || out.name.includes("admin")))) break;
+      }
+      return;
+    }
+    if (typeof r === "object") {
+      const id = Number(r.idRol ?? r.id ?? r.Id);
+      const name = String(r.nombre ?? r.name ?? "").toLowerCase();
+      if (!Number.isNaN(id)) out.id = id;
+      if (name) out.name = name;
+    }
+  };
+
+  tryPick(me.rol ?? me.role ?? me.roles);
+  if (out.id == null && out.name == null) tryPick(me.idRol ?? me.id_rol);
+  return out;
+}
+
+function isAllowedRoleFromMe(me) {
+  const { id, name } = normalizeRoleFromMe(me);
+  if (id === 1 || id === 2) return true;                // Admin o Mesero por id
+  if (!name) return false;
+  const n = name.toLowerCase();
+  return n.includes("meser") || n.includes("admin");     // por nombre
+}
+
+async function isAllowedRoleByEmpleadoFallback(me) {
   try {
-    const data = await fetchJSON(`${API_BASE}/apiOfertas/getDataOfertas`, { method: 'GET' });
-    if (data && Array.isArray(data.data)) {
-      return data.data.map(oferta => {
-        const ini = fmtFechaYMD(oferta.fechaInicio);
-        const fin = fmtFechaYMD(oferta.fechaFin);
-        let textoFecha = '';
-        if (ini && fin) textoFecha = ` · Del ${ini} al ${fin}`;
-        else if (fin) textoFecha = ` · Hasta ${fin}`;
-        return {
-          title: oferta.descripcion,
-          content: `${oferta.porcentajeDescuento}% de descuento${textoFecha}`,
-          bgColor: oferta.bgColor || "bg-gradient-to-r from-blue-400 to-blue-600",
-          icon: oferta.icon || "fas fa-tag",
-        };
-      });
-    }
-    return [];
-  } catch (e) {
-    // Si es auth/permiso, no ensuciar la consola: asumimos "sin ofertas visibles"
-    if (e.status === 401 || e.status === 403) return [];
-    // Otros errores sí se registran
-    console.error('Error en la solicitud de ofertas:', e); 
-    return [];
+    const authUrl = new URL(API.auth, window.location.href);
+    const host = authUrl.origin;
+    const data = await fetchJSON(`${host}/apiEmpleado/getDataEmpleado?page=0&size=1000`, { method: "GET" });
+    const list = Array.isArray(data?.content) ? data.content : (Array.isArray(data) ? data : []);
+    const idEmp = Number(me?.idEmpleado ?? me?.empleadoId ?? me?.idempleado);
+    const emp = list.find(e => Number(e.id ?? e.Id ?? e.idEmpleado ?? e.id_empleado) === idEmp);
+    if (!emp) return false;
+
+    const idRol = Number(emp.idRol ?? emp.rolId ?? emp.rol?.id ?? emp.rol?.Id ?? emp.id_rol);
+    const nomRol = String(emp.rol?.nombre ?? emp.rolNombre ?? "").toLowerCase();
+    return idRol === 1 || idRol === 2 || nomRol.includes("admin") || nomRol.includes("meser");
+  } catch {
+    return false;
   }
 }
-   
 
-  // Función para renderizar las ofertas en el carrusel
-  async function renderOfertas() {
-    const ofertas = await obtenerOfertas();
+async function assertAllowedRoleOrThrow(me) {
+  if (isAllowedRoleFromMe(me)) return;
+  if (await isAllowedRoleByEmpleadoFallback(me)) return;
+  throw new Error("Acceso restringido: solo meseros o administradores pueden iniciar sesión.");
+}
 
-    if (!Array.isArray(ofertas) || ofertas.length === 0) {
-      console.log('No se encontraron ofertas para mostrar.');
+
+
+
+/* ===================== login flow ===================== */
+document.addEventListener("DOMContentLoaded", () => {
+  const form = $("#loginForm");
+  const emailEl = $("#email");
+  const passEl = $("#password");
+  const btn = form?.querySelector('button[type="submit"]');
+
+  if (!form) return;
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const correoInput = emailEl?.value?.trim();
+    const contrasenia = passEl?.value ?? "";
+
+    if (!correoInput || !contrasenia) {
+      showAlert("error", "Completa ambos campos.");
       return;
     }
 
-    const cardContainer = document.getElementById('card-container');
-    if (!cardContainer) return;
-
-    let currentCardIndex = 0;
-    let timerId = null;
-    const AUTOPLAY_MS = 10000;
-
-    const startAutoplay = () => {
-      clearInterval(timerId);
-      timerId = setInterval(() => {
-        nextCard();
-      }, AUTOPLAY_MS);
-    };
-
-    const resetAutoplay = () => {
-      clearInterval(timerId);
-      startAutoplay();
-    };
-
-    const renderCard = (index) => {
-      const card = ofertas[index];
-      const cardElement = document.createElement('div');
-      cardElement.className = `absolute inset-0 ${card.bgColor} text-white p-6 rounded-xl flex flex-col justify-center card-slide-in`;
-      cardElement.innerHTML = `
-        <i class="${card.icon} text-3xl mb-4"></i>
-        <h3 class="text-xl font-bold">${card.title}</h3>
-        <p class="text-sm opacity-90">${card.content}</p>
-      `;
-
-      if (cardContainer.firstChild) {
-        const oldCard = cardContainer.firstChild;
-        oldCard.classList.remove('card-slide-in');
-        oldCard.classList.add('card-slide-out');
-        setTimeout(() => {
-          cardContainer.innerHTML = '';
-          cardContainer.appendChild(cardElement);
-        }, 500);
-      } else {
-        cardContainer.appendChild(cardElement);
-      }
-
-      const allIndicators = Array.from(document.querySelectorAll('[id^="indicator-"]'));
-      allIndicators.forEach((indicator, i) => {
-        indicator.className = i === index
-          ? 'w-2 h-2 bg-blue-400 rounded-full'
-          : 'w-2 h-2 bg-gray-300 rounded-full';
-      });
-    };
-
-    const goTo = (i) => {
-      if (!ofertas.length) return;
-      currentCardIndex = (i + ofertas.length) % ofertas.length;
-      renderCard(currentCardIndex);
-    };
-
-    const nextCard = () => goTo(currentCardIndex + 1);
-    const prevCard = () => goTo(currentCardIndex - 1);
-
-    const outer = cardContainer.parentElement;
-    outer.querySelectorAll('.ofertas-btn').forEach(el => el.remove());
-
-    const mkBtn = (side) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = `ofertas-btn absolute top-1/2 -translate-y-1/2 ${side === 'left' ? 'left-2' : 'right-2'} 
-        bg-white/20 hover:bg-white/80 shadow-sm rounded-full w-8 h-8 flex items-center justify-center
-        transition focus:outline-none focus:ring-1 focus:ring-blue-400 backdrop-blur`;
-      btn.setAttribute('aria-label', side === 'left' ? 'Anterior' : 'Siguiente');
-      btn.innerHTML = side === 'left'
-        ? '<i class="fas fa-chevron-left text-gray-700 text-sm"></i>'
-        : '<i class="fas fa-chevron-right text-gray-700 text-sm"></i>';
-      btn.addEventListener('click', () => {
-        side === 'left' ? prevCard() : nextCard();
-        resetAutoplay();
-      });
-      return btn;
-    };
-
-    if (ofertas.length > 1) {
-      outer.appendChild(mkBtn('left'));
-      outer.appendChild(mkBtn('right'));
+    // << NUEVO: valida que sea Gmail "realista"
+    const g = validateGmailAddress(correoInput);
+    if (!g.ok) {
+      showAlert("error", g.reason);
+      emailEl?.focus();
+      return;
     }
+    const correo = g.value; // usa el correo canonizado @gmail.com
 
-    const indicators = Array.from(document.querySelectorAll('[id^="indicator-"]'));
-    indicators.forEach((el, idx) => {
-      if (idx < ofertas.length) {
-        el.style.cursor = 'pointer';
-        el.onclick = () => { goTo(idx); resetAutoplay(); };
-      } else {
-        el.style.cursor = 'default';
-        el.onclick = null;
-      }
-    });
-
-    renderCard(0);
-    if (ofertas.length > 1) startAutoplay();
-
-    let startX = null;
-    outer.addEventListener('touchstart', (e) => {
-      if (e.touches && e.touches.length === 1) startX = e.touches[0].clientX;
-    }, { passive: true });
-    outer.addEventListener('touchend', (e) => {
-      if (startX === null || !e.changedTouches || e.changedTouches.length !== 1) return;
-      const delta = e.changedTouches[0].clientX - startX;
-      if (Math.abs(delta) > 40) {
-        delta > 0 ? prevCard() : nextCard();
-        resetAutoplay();
-      }
-      startX = null;
-    }, { passive: true });
-  }
-
-  // ==========================
-  //  SALUDO DINÁMICO
-  // ==========================
-
-  async function fetchUsuarioActual() {
-    try {
-      console.log('🔍 Token antes de /me:', getAuthToken() ? 'Existe' : 'NO HAY');
-      
-      const data = await fetchJSON(ME_ENDPOINT, {  // <-- Debe usar fetchJSON
-        method: "GET"
-      });
-      
-      console.log('Respuesta /me:', data);
-      return data || null;
-    } catch (error) {
-      console.error('Error:', error);
-      return null;
-    }
-  }
-
-  // Extrae el nombre a mostrar del objeto /me
-  function obtenerNombreMostrar(me) {
-    if (!me) return null;
-    
-    if (me.username) return String(me.username).trim();
-    
-    if (me.correo || me.email) {
-      const correo = String(me.correo || me.email);
-      const user = correo.split("@")[0] || correo;
-      return user;
-    }
-    
-    return null;
-  }
-
-  function obtenerRolMostrar(me) {
-    if (!me) return null;
-    return me.rol || null;
-  }
-
-  // Pinta el saludo y el menú de usuario en la UI
-  function pintarUsuarioEnUI(me) {
-    const nombre = obtenerNombreMostrar(me) || "Usuario";
-    const rol = obtenerRolMostrar(me);
-
-    const spanSaludo = document.getElementById("greeting-name");
-    if (spanSaludo) spanSaludo.textContent = nombre;
-
-    const menuName = document.getElementById("user-menu-name");
-    if (menuName) menuName.textContent = nombre;
-
-    const menuRole = document.getElementById("user-menu-role");
-    if (menuRole && rol) menuRole.textContent = rol;
-
-    const img = document.getElementById("user-menu-img");
-    if (img && me.fotoUrl) img.src = me.fotoUrl;
-
-    try { 
-      localStorage.setItem("orderly_me_cache", JSON.stringify({ nombre, rol })); 
-    } catch {}
-  }
-
-  // Si falla /me, usa cache si existe
-  function pintarDesdeCacheSiDisponible() {
-    try {
-      const raw = localStorage.getItem("orderly_me_cache");
-      if (!raw) return;
-      
-      const { nombre, rol } = JSON.parse(raw);
-      
-      if (nombre) {
-        const spanSaludo = document.getElementById("greeting-name");
-        if (spanSaludo) spanSaludo.textContent = nombre;
-        
-        const menuName = document.getElementById("user-menu-name");
-        if (menuName) menuName.textContent = nombre;
-      }
-      
-      if (rol) {
-        const menuRole = document.getElementById("user-menu-role");
-        if (menuRole) menuRole.textContent = rol;
-      }
-    } catch {}
-  }
-
-  // ==========================
-  //  CERRAR SESIÓN
-  // ==========================
-
-  async function cerrarSesion() {
-    try {
-      await fetchJSON(`${API_BASE}/api/auth/logout`, {
-        method: 'POST'
-      });
-      console.log('Sesión cerrada correctamente');
-    } catch (error) {
-      console.error('Error en la solicitud de logout:', error);
-    } finally {
-      localStorage.removeItem('orderly_me_cache');
-      localStorage.removeItem('estadoMesas');
-      localStorage.removeItem('pedidosGuardados');
-      setAuthToken(null); // Usa apiConfig para limpiar el token
-      window.location.href = 'login.html';
-    }
-  }
-
-  // Función para toggle del menú de usuario
-  function inicializarMenuUsuario() {
-    const userMenuBtn = document.getElementById('user-menu-btn');
-    const userMenu = document.getElementById('user-menu');
-    const overlay = document.getElementById('overlay');
-    const logoutBtn = document.getElementById('logout-btn');
-
-    if (userMenuBtn) {
-      userMenuBtn.addEventListener('click', () => {
-        if (userMenu) userMenu.classList.toggle('active');
-        if (overlay) overlay.classList.toggle('active');
-      });
-    }
-
-    if (overlay) {
-      overlay.addEventListener('click', () => {
-        if (userMenu) userMenu.classList.remove('active');
-        overlay.classList.remove('active');
-      });
-    }
-
-    if (logoutBtn) {
-      logoutBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        cerrarSesion();
-      });
-    }
-  }
-
-  // ==========================
-  // Fecha y actualización periódica
-  // ==========================
-  const updateCurrentDate = () => {
-    const now = new Date();
-    const options = { weekday: 'short', day: 'numeric', month: 'short' };
-    const el = document.getElementById('current-date');
-    if (el) el.textContent = now.toLocaleDateString('es-ES', options);
-  };
-
-  const actualizarTodo = () => {
-    obtenerEstadisticasMesas();
-    obtenerEstadisticasPedidos();
-  };
-
-  // ==========================
-  //  INICIALIZACIÓN - VERSION DEBUG
-  // ==========================
-  document.addEventListener('DOMContentLoaded', async () => {
-    // BLOQUEO TEMPRANO: si no hay token, muestra el gate y no sigas
-    if (enforceAuthGateEarly()) return;
-
-    console.log('====================================');
-    console.log('INICIANDO DEBUG DE AUTENTICACIÓN');
-    console.log('====================================');
-
-    // 1. (Diagnóstico opcional)
-    const token = sessionStorage.getItem('authToken');
-    console.log('1. Token en sessionStorage:', token ? `SÍ (${token.substring(0,30)}...)` : 'NO EXISTE');
+    const btn = form?.querySelector('button[type="submit"]');
+    btn?.setAttribute("disabled", "true");
 
     try {
-      // 2. /me usando fetchJSON que ya mete el Bearer
-      const me = await fetchUsuarioActual();
-      console.log('3. Respuesta de /me:', me);
+      // (lo demás queda igual)
+      try {
+        await fetch(`${API.auth}/logout`, { method: "POST", credentials: "include" });
+        setAuthToken(null);
+      } catch { }
 
-      if (!me) {
-        console.error('PROBLEMA: /me retornó null o vacío');
-        renderAuthGate();   // ← BLOQUEA UI
-        return;             // ← NO sigas inicializando
+      const loginResponse = await fetchJSON(`${API.auth}/login`, {
+        method: "POST",
+        body: JSON.stringify({ correo, contrasenia }),
+      });
+
+      if (loginResponse?.token) setAuthToken(loginResponse.token);
+
+      const me = await fetchJSON(`${API.auth}/me`, { method: "GET" });
+      const mismoUsuario = (me?.correo || "").toLowerCase() === correo.toLowerCase();
+      if (!mismoUsuario) {
+        try { await fetch(`${API.auth}/logout`, { method: "POST", credentials: "include" }); setAuthToken(null); } catch { }
+        throw new Error("Credenciales inválidas.");
       }
 
-      console.log('SUCCESS: Usuario autenticado:', me.username || me.correo);
-      pintarUsuarioEnUI(me);
+      // << NUEVO: restringe a rol Mesero (idRol = 2)
+      try {
+        await assertAllowedRoleOrThrow(me);
+      } catch (err) {
+        try { await fetch(`${API.auth}/logout`, { method: "POST", credentials: "include" }); setAuthToken(null); } catch { }
+        throw err; // se mostrará en el catch general
+      }
 
-      // ===== Inicialización normal de tu home =====
-      reiniciarSistemaSiEsNuevoDia();
-      inicializarMenuUsuario();
-      obtenerEstadisticasMesas();
-      obtenerEstadisticasPedidos();
-      renderOfertas();
-      updateCurrentDate();
-      setInterval(actualizarTodo, 5000);
+      // Éxito
+      playLoginSuccessFxFull();
+      showAlert("success", "¡Bienvenido! Entrando…", { timeout: 1400 });
+      setTimeout(() => { window.location.href = "inicio.html"; }, 1000);
 
-      // Watchdog: si el token se borra en caliente, bloquea con el gate
-      setInterval(() => { if (!hasAuth()) renderAuthGate(); }, 1500);
 
-    } catch (e) {
-      console.error('ERROR al obtener /me:', e);
-      console.error('Detalles:', e.message);
-      renderAuthGate();  // ← BLOQUEA UI
-      return;            // ← NO sigas inicializando
+    } catch (err) {
+      console.error(err);
+      showAlert("error", err?.message || "No se pudo iniciar sesión.");
+      btn?.removeAttribute("disabled");
     }
   });
+
+});
+
+// Toggle ver/ocultar contraseña (no interfiere con el login)
+const toggleBtn = document.getElementById('togglePass');
+const passInput = document.getElementById('password');
+if (toggleBtn && passInput) {
+  const eyeOn = toggleBtn.querySelector('.eye-on');
+  const eyeOff = toggleBtn.querySelector('.eye-off');
+  toggleBtn.addEventListener('click', () => {
+    const show = passInput.type === 'password';
+    passInput.type = show ? 'text' : 'password';
+    toggleBtn.setAttribute('aria-label', show ? 'Ocultar contraseña' : 'Mostrar contraseña');
+    eyeOn.classList.toggle('hidden', show);
+    eyeOff.classList.toggle('hidden', !show);
+  });
+}
+
+

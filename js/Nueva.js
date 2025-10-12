@@ -80,7 +80,7 @@ document.addEventListener('DOMContentLoaded', function() {
         confirmInput.classList.add('border-green-500', 'bg-green-50');
 
         // Redirige al login
-        setTimeout(() => { window.location.href = 'LogIn.html'; }, 1500);
+        setTimeout(() => { window.location.href = 'index.html'; }, 1500);
       }
     } catch (error) {
       const msg = (error?.message || '').toLowerCase();

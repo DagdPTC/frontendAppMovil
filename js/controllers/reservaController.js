@@ -29,7 +29,7 @@ function renderAuthGate() {
         </div>
         <h2 class="text-lg font-semibold mb-1">Sesión requerida</h2>
         <p class="text-gray-600 mb-4">Inicia sesión para ver y gestionar las reservaciones.</p>
-        <a href="login.html"
+        <a href="index.html"
            class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition">
           <i class="fa-solid fa-arrow-right-to-bracket"></i>
           Iniciar sesión
