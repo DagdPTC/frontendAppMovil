@@ -12,6 +12,8 @@ import {
 } from "../services/ordersService.js";
 import { getPlatillos } from "../services/menuService.js";
 
+const K_MESA_SNAP = "mesaSnapshotPending";
+
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
@@ -802,11 +804,17 @@ function saveFormSnapshot() {
 function restoreFormSnapshot() {
   const name = localStorage.getItem(K_CLIENTE);
   const mesa = localStorage.getItem(K_MESA);
+
   if (name) $("#customer-name").value = name;
-  if (mesa) $("#table-select").value = mesa;
+
+  // No seteamos la mesa aquí: primero hay que repoblar el <select> de mesas.
+  // La guardamos temporalmente en sessionStorage y luego la re-aplicamos.
+  if (mesa) sessionStorage.setItem(K_MESA_SNAP, mesa);
+
   localStorage.removeItem(K_CLIENTE);
   localStorage.removeItem(K_MESA);
 }
+
 function restoreWaiter(waiterSelect) {
   if (!waiterSelect) return;
   const saved = sessionStorage.getItem(K_WAITER);
@@ -2199,10 +2207,10 @@ function buildPayloadsFromSelection() {
     totalPedido: Number(total.toFixed(2)),
     subtotal: Number(subtotal.toFixed(2)),
     propina: Number(propina.toFixed(2)),
-    FPedido: FPedidoISO,           
-    fpedido: FPedidoISO,           
+    FPedido: FPedidoISO,
+    fpedido: FPedidoISO,
     fechaPedido: FPedidoISO,
-    horaInicio: FPedidoISO,       
+    horaInicio: FPedidoISO,
     items,
     nombreCliente,
     observaciones,
@@ -2245,23 +2253,23 @@ async function actualizarPedido(editId) {
   const body = buildPayloadsFromSelection(); // trae idMesa, idEstadoPedido, items, etc.
   await updatePedido(editId, body);
 
-  const mesaAntes   = Number(editingOriginalMesaId || 0);
+  const mesaAntes = Number(editingOriginalMesaId || 0);
   const nuevaMesaId = Number(body.idMesa || 0);
   const nombreEstado = (MAP_ESTADOS.get(Number(body.idEstadoPedido))?.nombre || "").toLowerCase();
   const cerrado = nombreEstado.includes("final")
-               || nombreEstado.includes("cancel")
-               || nombreEstado.includes("anul")
-               || nombreEstado.includes("rechaz");
+    || nombreEstado.includes("cancel")
+    || nombreEstado.includes("anul")
+    || nombreEstado.includes("rechaz");
 
   // Si cambió de mesa, liberar la anterior
   if (mesaAntes && nuevaMesaId && mesaAntes !== nuevaMesaId) {
-    try { await liberarMesa(mesaAntes); } catch {}
+    try { await liberarMesa(mesaAntes); } catch { }
   }
 
   // Regla de ocupada/libre según estado (sin IDs mágicos)
   if (nuevaMesaId) {
-    if (cerrado) { try { await liberarMesa(nuevaMesaId); } catch {} }
-    else         { try { await ocuparMesa(nuevaMesaId);  } catch {} }
+    if (cerrado) { try { await liberarMesa(nuevaMesaId); } catch { } }
+    else { try { await ocuparMesa(nuevaMesaId); } catch { } }
   }
 
   // Limpieza de estado de edición
@@ -2337,6 +2345,34 @@ function hideLoader() {
   if (LOADER_COUNT === 0) host.classList.remove("open");
 }
 
+// === GATE DE AUTENTICACIÓN (Pedidos) ===
+function renderAuthGate() {
+  // Contenedor principal de la vista
+  const host =
+    document.querySelector("main") ||
+    document.querySelector(".main-content") ||
+    document.body;
+
+  if (!host) return;
+
+  host.innerHTML = `
+    <div class="p-6 grid place-items-center min-h-[60vh]">
+      <div class="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow p-6 text-center">
+        <div class="mx-auto w-14 h-14 rounded-full bg-blue-50 grid place-items-center mb-3">
+          <i class="fa-solid fa-lock text-blue-600 text-xl"></i>
+        </div>
+        <h2 class="text-lg font-semibold mb-1">Sesión requerida</h2>
+        <p class="text-gray-600 mb-4">Inicia sesión para ver y gestionar los pedidos.</p>
+        <a href="login.html"
+           class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition">
+          <i class="fa-solid fa-arrow-right-to-bracket"></i>
+          Iniciar sesión
+        </a>
+      </div>
+    </div>
+  `;
+}
+
 
 
 
@@ -2344,6 +2380,20 @@ document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
   ensureOrderOverlayStyles();
+
+  // === 0) VALIDAR SESIÓN ANTES DE MONTAR LA UI ===
+  // Usamos ensureMeInSession del ordersService (ya importado).
+  // Si no hay token o /me devuelve 401, mostramos el gate y salimos.
+  try {
+    const me = await ensureMeInSession({ forceNetwork: true });
+    if (!me) {
+      renderAuthGate();
+      return;
+    }
+  } catch (_) {
+    renderAuthGate();
+    return;
+  }
 
   const ordersList = $("#orders-list");
   const newOrderBtn = $("#new-order-btn");
@@ -2361,7 +2411,7 @@ async function init() {
   await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
   await cargarEmpleados(waiterSelect);
   await cargarMesasSelect();
-  await ensureMeInSession({ forceNetwork: true });
+  await ensureMeInSession({ forceNetwork: true }); // (se mantiene; no cambia funcionalidad)
   hideLoader();
 
   // 3) Abrir “nuevo pedido”
@@ -2423,7 +2473,6 @@ async function init() {
 
     const back = (location.pathname.split("/").pop() || "orders.html") + "#new";
     showLoader("Cargando platillos…");
-    // pequeña espera para que se vea el loader antes de navegar
     setTimeout(() => {
       window.location.href = `menu.html?select=1&back=${encodeURIComponent(back)}`;
     }, 90);
@@ -2511,7 +2560,17 @@ async function init() {
     } else {
       await cargarEmpleados(waiterSelect);
       await cargarMesasSelect();
+
+      // <- NUEVO: re-aplica la mesa que el usuario había elegido antes de ir al menú
+      const mesaPending = sessionStorage.getItem(K_MESA_SNAP);
+      if (mesaPending && tableSelect) {
+        tableSelect.value = String(mesaPending);
+        tableSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        tableSelect._fancy?.sync?.();
+      }
+      sessionStorage.removeItem(K_MESA_SNAP);
     }
+
 
     sessionStorage.removeItem(K_OPEN_FORM);
 
@@ -2525,6 +2584,7 @@ async function init() {
   // 8) Skin (igual)
   applyModernSkin();
 }
+
 
 
 

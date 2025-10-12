@@ -2,7 +2,6 @@
 // Reemplaza COMPLETO este archivo
 
 import { getMesas, fetchPedidosAll } from "../services/mesaService.js";
-import { getAuthToken } from "../services/apiConfig.js"; // ← añadido
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -10,52 +9,6 @@ const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const API_HOST = "https://orderly-api-b53514e40ebd.herokuapp.com";
 const MAX_SIZE = 50;
 const AUTO_REFRESH_MS = 3000;
-
-/* =============== Auth helpers (añadidos) =============== */
-let IS_AUTH = false;
-
-function hasAuth() {
-  const t = getAuthToken?.();
-  return !!t && typeof t === "string";
-}
-function buildAuthHeaders(extra = {}) {
-  const h = { ...extra };
-  const t = getAuthToken?.();
-  if (t && !h.Authorization) h.Authorization = `Bearer ${t}`;
-  return h;
-}
-function renderAuthGate() {
-  // Intenta usar el contenedor real si existe; si no, usa el <main>
-  const host =
-    $("#mesas-grid") ||
-    $("#tables-grid") ||
-    $("#mesas-container") ||
-    $("#tables-list") ||
-    $("#mesas-list") ||
-    $("main") ||
-    document.body;
-
-  if (!host) return;
-
-  host.innerHTML = `
-    <div class="p-6 grid place-items-center min-h-[50vh]">
-      <div class="max-w-md w-full bg-white border border-gray-200 rounded-2xl shadow p-6 text-center">
-        <div class="mx-auto w-14 h-14 rounded-full bg-blue-50 grid place-items-center mb-3">
-          <i class="fa-solid fa-lock text-blue-600 text-xl"></i>
-        </div>
-        <h2 class="text-lg font-semibold mb-1">Sesión requerida</h2>
-        <p class="text-gray-600 mb-4">
-          Para ver y gestionar las mesas necesitas iniciar sesión primero.
-        </p>
-        <a href="login.html"
-           class="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white hover:bg-blue-700 transition">
-          <i class="fa-solid fa-arrow-right-to-bracket"></i>
-          Iniciar sesión
-        </a>
-      </div>
-    </div>
-  `;
-}
 
 /* =============== Helpers =============== */
 const norm = (s) => String(s ?? "")
@@ -135,10 +88,7 @@ async function fetchEstadosMesa() {
 
   while (true) {
     const url = `${base}?page=${page}&size=${size}`;
-    // ← añadido: Authorization si hay token
-    const headers = buildAuthHeaders({ Accept: "application/json" });
-
-    const res = await fetch(url, { headers, credentials: "include", cache: "no-store" });
+    const res = await fetch(url, { headers: { Accept: "application/json" }, credentials: "include", cache: "no-store" });
     if (!res.ok) break;
 
     const data = await res.json().catch(() => ({}));
@@ -169,13 +119,10 @@ function filtraEstadosParaEdicion(estados) {
 /* =============== API PATCH real =============== */
 async function updateMesaEstadoApi(idMesa, idEstado) {
   const url = `${API_HOST}/apiMesa/estado/${encodeURIComponent(idMesa)}/${encodeURIComponent(idEstado)}`;
-  // ← añadido: Authorization si hay token
-  const headers = buildAuthHeaders({ Accept: "application/json" });
-
   const res = await fetch(url, {
     method: "PATCH",
     credentials: "include",
-    headers,
+    headers: { Accept: "application/json" },
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
@@ -339,94 +286,18 @@ async function syncMesasSegunPedidos(mesas, estados, { busy = false } = {}) {
   return updates.length > 0;
 }
 
-// === UNIFICADOR DE ALERTAS (misma altura en todas las pantallas) ===
-(function(){
-  const STYLE_ID = "alerts-host-unified-style";
-
-  function ensureGlobalStyle(){
-    if (document.getElementById(STYLE_ID)) return;
-    const st = document.createElement("style");
-    st.id = STYLE_ID;
-    st.textContent = `
-      #alerts-host{
-        position: fixed !important;
-        top: var(--alerts-top, 20px) !important;   /* ALTURA UNIFICADA */
-        right: 16px !important;
-        left: auto !important;
-        bottom: auto !important;
-        margin: 0 !important;
-        z-index: 2147483647 !important;
-        pointer-events: none !important;
-        display: flex !important;
-        flex-direction: column !important;
-        gap: 12px !important;
-      }
-      #alerts-host > * { pointer-events: auto !important; }
-    `;
-    document.head.appendChild(st);
+/* =============== Alertas =============== */
+function ensureAlertHost() {
+  let host = document.getElementById("alerts-host");
+  if (!host) {
+    host = document.createElement("div");
+    host.id = "alerts-host";
+    host.setAttribute("aria-live", "polite");
+    host.className = "fixed top-4 right-4 z-[120] space-y-3 pointer-events-none";
+    document.body.appendChild(host);
   }
-
-  function normalizeHost(){
-    let host = document.getElementById("alerts-host");
-    if (!host) {
-      host = document.createElement("div");
-      host.id = "alerts-host";
-      host.setAttribute("aria-live", "polite");
-      document.body.appendChild(host);
-    } else if (host.parentElement !== document.body) {
-      document.body.appendChild(host); // lo cuelga del <body>
-    }
-    // quita clases que alteren la posición
-    host.className = "";
-    // altura configurable globalmente con window.__ALERTS_TOP__
-    host.style.setProperty("--alerts-top", (window.__ALERTS_TOP__ || "20px"));
-    // fuerza estilos de posición
-    host.style.position = "fixed";
-    host.style.top      = "var(--alerts-top)";
-    host.style.right    = "16px";
-    host.style.left     = "auto";
-    host.style.bottom   = "auto";
-    host.style.margin   = "0";
-    host.style.zIndex   = "2147483647";
-    host.style.pointerEvents = "none";
-    return host;
-  }
-
-  let mo;
-  function observeHost(host){
-    if (mo) return;
-    mo = new MutationObserver(() => { normalizeHost(); });
-    mo.observe(host, { attributes: true, attributeFilter: ["class", "style"] });
-  }
-
-  // API para ajustar la altura global si quieres (px, rem, etc.)
-  window.installUnifiedAlerts = function(y){
-    window.__ALERTS_TOP__ = (typeof y === "number" ? `${y}px` : (y || "20px"));
-    ensureGlobalStyle();
-    const host = normalizeHost();
-    observeHost(host);
-    return host;
-  };
-
-  // Reemplazo central de ensureAlertHost usado por showAlert()
-  window.ensureAlertHost = function ensureAlertHost(){
-    ensureGlobalStyle();
-    const host = normalizeHost();
-    observeHost(host);
-    return host;
-  };
-
-  // Inicializa al cargar
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => installUnifiedAlerts(window.__ALERTS_TOP__ || "20px"));
-  } else {
-    installUnifiedAlerts(window.__ALERTS_TOP__ || "20px");
-  }
-})();
-
-
-
-
+  return host;
+}
 function showAlert(type = "info", text = "", { timeout = 3500 } = {}) {
   const host = ensureAlertHost();
   const wrap = document.createElement("div");
@@ -764,7 +635,6 @@ function startAutoRefresh() {
   if (_autoTimer) return;
   _autoTimer = setInterval(() => {
     // Pausar si pestaña oculta o hay un select abierto o hay overlay
-    if (!IS_AUTH) return; // ← añadido: no refrescar sin sesión
     if (document.hidden || FS_OPEN_COUNT > 0 || BUSY_COUNT > 0) return;
     if (_mesasContainer) renderMesasGrid(_mesasContainer);
   }, AUTO_REFRESH_MS);
@@ -777,20 +647,6 @@ function stopAutoRefresh() {
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
-  // AUTH CHECK (antes de todo)
-  IS_AUTH = hasAuth();
-  if (!IS_AUTH) {
-    renderAuthGate();
-    // escucha cambios entre pestañas (login/logout)
-    window.addEventListener("storage", (e) => {
-      if (e.key === "authToken") {
-        IS_AUTH = hasAuth();
-        if (IS_AUTH) location.reload(); // al loguear en otra pestaña, recarga para iniciar vista
-      }
-    });
-    return; // ← NO ejecuta nada si no hay sesión
-  }
-
   _mesasContainer = $("#mesas-grid") || $("#tables-grid") || $("#mesas-container") || $("#tables-list") || $("#mesas-list");
   if (!_mesasContainer) {
     console.warn("[Mesas] No se encontró el contenedor (#mesas-grid | #tables-grid | #mesas-container | #tables-list | #mesas-list).");
@@ -813,14 +669,4 @@ async function init() {
   window.addEventListener("pedido:cambiado", () => {
     if (FS_OPEN_COUNT === 0 && BUSY_COUNT === 0) renderMesasGrid(_mesasContainer);
   });
-
-  // Watchdog por si el token se borra en caliente en esta misma pestaña
-  setInterval(() => {
-    const ok = hasAuth();
-    if (IS_AUTH && !ok) {
-      IS_AUTH = false;
-      stopAutoRefresh();
-      renderAuthGate();
-    }
-  }, 1500);
 }
