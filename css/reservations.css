@@ -191,3 +191,247 @@ textarea:focus {
 .action-btn:active {
   transform: scale(0.98);
 }
+
+/* ========================================
+   RESERVATIONS.CSS - Estilos para el sistema de reservas
+   ======================================== */
+
+/* === Animaciones === */
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fadeSlideIn {
+  animation: fadeSlideIn 0.3s ease-out;
+}
+
+/* === Modal Overlay === */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 9998;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* === Modal Content === */
+.modal-content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+  z-index: 9999;
+  animation: slideUp 0.3s ease-out;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -45%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* === Scrollbar personalizado === */
+.modal-content::-webkit-scrollbar,
+#tables-grid::-webkit-scrollbar {
+  width: 8px;
+}
+
+.modal-content::-webkit-scrollbar-track,
+#tables-grid::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
+}
+
+.modal-content::-webkit-scrollbar-thumb,
+#tables-grid::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 10px;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover,
+#tables-grid::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* === Botones de Mesa === */
+.mesa-btn-selected {
+  position: relative;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+#tables-grid button {
+  transition: all 0.2s ease;
+  min-height: 80px;
+}
+
+#tables-grid button:not(:disabled):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+#tables-grid button:disabled {
+  cursor: not-allowed;
+}
+
+/* === Badges de Estado === */
+.badge--pending {
+  background-color: #9ca3af;
+}
+
+.badge--prep {
+  background-color: #f59e0b;
+}
+
+.badge--paid {
+  background-color: #10b981;
+}
+
+.badge--deliv {
+  background-color: #3b82f6;
+}
+
+/* === Cards de Reserva === */
+#reservations-list > div {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+#reservations-list > div:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+}
+
+/* === Input States === */
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+}
+
+.border-red-500 {
+  border-color: #ef4444 !important;
+  background-color: #fef2f2;
+}
+
+.border-green-500 {
+  border-color: #10b981 !important;
+  background-color: #f0fdf4;
+}
+
+/* === Responsive === */
+@media (max-width: 768px) {
+  .modal-content {
+    width: 95%;
+    max-height: 85vh;
+  }
+
+  #tables-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+  }
+
+  #tables-grid button {
+    min-height: 70px;
+    padding: 0.5rem;
+  }
+}
+
+/* === Loading Spinner === */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.fa-spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* === Info Box === */
+#mesas-info {
+  transition: all 0.3s ease;
+}
+
+/* === Hover Effects === */
+.transition-all {
+  transition-property: all;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+/* === Empty State === */
+#reservations-empty {
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* === Button Disabled State === */
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* === Gradient Background === */
+.bg-gradient-to-r {
+  background-image: linear-gradient(to right, var(--tw-gradient-stops));
+}
+
+/* === Print Styles === */
+@media print {
+  .modal-overlay,
+  .modal-content,
+  nav,
+  #button-section {
+    display: none !important;
+  }
+
+  #reservations-list > div {
+    page-break-inside: avoid;
+  }
+}
+
+/* === Ocultar leyenda del modal de mesas === */
+#tables-modal #mesas-legend,
+#tables-modal .mesas-legend,
+#tables-modal #legend-mesas,
+#tables-modal .legend-mesas,
+#tables-modal .legend-box,
+#tables-modal .legend-container,
+#tables-modal [data-legend],
+#tables-modal .legend {
+  display: none !important;
+}
+
+/* Quita espacios si la leyenda estaba separando bloques */
+#tables-modal #mesas-legend + *,
+#tables-modal .mesas-legend + *,
+#tables-modal #legend-mesas + *,
+#tables-modal .legend-mesas + *,
+#tables-modal .legend + * {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+  border-top: 0 !important;
+}

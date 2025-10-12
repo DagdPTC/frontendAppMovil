@@ -176,32 +176,33 @@
             <!-- Mesas -->
             <div class="md:col-span-2">
               <label class="block text-sm font-medium text-gray-700 mb-1">
-                Mesa <span class="text-red-500">*</span>
+                Mesas <span class="text-red-500">*</span>
               </label>
               <button id="select-tables-btn" 
                       type="button"
                       class="w-full border-2 border-dashed border-gray-300 rounded-lg py-3 text-gray-600 hover:border-blue-500 hover:text-blue-600 hover:bg-blue-50 transition-all">
-                <i class="fas fa-chair mr-2"></i>Seleccionar Mesa
+                <i class="fas fa-chair mr-2"></i>Seleccionar Mesas
               </button>
               <p id="selected-tables-text" class="text-sm text-gray-600 mt-1">
                 Ninguna mesa seleccionada.
               </p>
               <p id="tables-error" class="hidden text-red-600 text-xs mt-1">
-                <i class="fas fa-exclamation-circle mr-1"></i>Seleccione una mesa.
+                <i class="fas fa-exclamation-circle mr-1"></i>Seleccione al menos una mesa.
               </p>
             </div>
 
-<!-- Comentarios -->
+            <!-- Comentarios -->
             <div class="md:col-span-2">
               <label for="reservation-comment" class="block text-sm font-medium text-gray-700 mb-1">
                 Comentarios (Opcional)
               </label>
               <textarea id="reservation-comment" 
                         rows="3" 
+                        maxlength="500"
                         placeholder="Ej: Cliente prefiere mesa cerca de la ventana, tiene alergia a mariscos..."
                         class="w-full p-2.5 border rounded-lg focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 resize-y transition"></textarea>
               <p class="text-xs text-gray-500 mt-1">
-                <i class="fas fa-info-circle mr-1"></i>Información adicional sobre la reserva
+                <i class="fas fa-info-circle mr-1"></i>Información adicional sobre la reserva (máx. 500 caracteres)
               </p>
             </div>
           </div>
@@ -213,11 +214,11 @@
               <i class="fas fa-save mr-2"></i>Guardar Reserva
             </button>
           </div>
-        </div>  <!-- Cierra .p-5 -->
-      </div>  <!-- Cierra .modal-content -->
-    </div>  <!-- Cierra #new-reservation-form -->
+        </div>
+      </div>
+    </div>
 
-      </div>  <!-- Cierra .max-w-6xl -->
+      </div>
     </main>
 
     <!-- Bottom Navigation -->
@@ -259,38 +260,76 @@
     </nav>
   </div>
 
-  <!-- MODAL Mesas -->
+  <!-- MODAL Mesas CON DISPONIBILIDAD EN TIEMPO REAL -->
   <div id="tables-modal" class="fixed inset-0 z-[10000] hidden">
     <div class="absolute inset-0 bg-black/40 backdrop-blur-sm" data-overlay="true"></div>
-    <div class="relative z-10 max-w-sm mx-auto my-10 bg-white rounded-xl shadow-2xl p-5">
-      <div class="flex justify-between items-center mb-4">
-        <h3 class="font-semibold text-gray-800 text-lg">
-          <i class="fas fa-chair mr-2 text-blue-600"></i>Seleccionar Mesa
-        </h3>
-        <button id="close-tables-modal" 
-                class="text-gray-400 hover:text-gray-600 text-2xl leading-none transition-colors">
-          &times;
-        </button>
+    <div class="relative z-10 max-w-md mx-auto my-6 bg-white rounded-xl shadow-2xl max-h-[90vh] flex flex-col">
+      
+      <!-- Header del Modal -->
+      <div class="bg-gradient-to-r from-blue-500 to-blue-600 px-5 py-4 flex-shrink-0 rounded-t-xl">
+        <div class="flex justify-between items-center">
+          <div class="flex items-center gap-2 text-white">
+            <i class="fas fa-chair text-xl"></i>
+            <h3 class="font-semibold text-lg">Seleccionar Mesas</h3>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="refresh-tables-btn" 
+                    class="text-white hover:bg-white/20 p-2 rounded-lg transition-colors"
+                    title="Actualizar disponibilidad">
+              <i class="fas fa-sync-alt"></i>
+            </button>
+            <button id="close-tables-modal" 
+                    class="text-white hover:bg-white/20 text-2xl leading-none p-2 rounded-lg transition-colors">
+              &times;
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- NUEVO: Info de Fecha/Hora Seleccionada -->
+      <div id="date-warning" class="px-5 py-3 bg-blue-50 border-b border-blue-100 flex-shrink-0">
+        <div class="flex items-center gap-2 text-sm text-blue-700">
+          <i class="fas fa-calendar-check"></i>
+          <span>Verificando disponibilidad...</span>
+        </div>
+      </div>
+
+      <!-- Info de Actualización Automática -->
+      <div class="px-5 py-2 bg-green-50 border-b border-green-100 flex-shrink-0">
+        <div class="flex items-center gap-2 text-xs text-green-700">
+          <i class="fas fa-sync-alt fa-spin"></i>
+          <span>Actualización automática cada 5 segundos</span>
+        </div>
       </div>
       
-      <div id="tables-grid" class="grid grid-cols-3 gap-2 mb-4 max-h-96 overflow-y-auto">
-        <!-- Mesas se cargan dinámicamente -->
+      <!-- Contenedor con Scroll -->
+      <div class="flex-1 overflow-y-auto p-5">
+        <!-- Grid de Mesas -->
+        <div id="tables-grid" class="grid grid-cols-3 gap-3 mb-4">
+          <!-- Mesas se cargan dinámicamente -->
+        </div>
+
+        <!-- Info de Mesas Seleccionadas -->
+        <div id="mesas-info" class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <p class="text-sm text-gray-500">Selecciona al menos una mesa</p>
+        </div>
       </div>
       
-      <div class="flex justify-end gap-2 pt-3 border-t">
+      <!-- Footer con Botones -->
+      <div class="flex justify-end gap-2 px-5 py-4 bg-gray-50 border-t flex-shrink-0 rounded-b-xl">
         <button id="cancel-tables-btn" 
-                class="px-4 py-2 text-sm border rounded-lg hover:bg-gray-50 transition-colors">
+                class="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors">
           Cancelar
         </button>
         <button id="save-tables-btn" 
                 class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
-          <i class="fas fa-check mr-1"></i>Guardar
+          <i class="fas fa-check mr-1"></i>Confirmar Selección
         </button>
       </div>
     </div>
   </div>
 
-  <!-- Script: Controller (importa el service internamente) -->
+  <!-- Script: Controller -->
   <script type="module" src="js/controllers/reservaController.js"></script>
 </body>
 </html>
