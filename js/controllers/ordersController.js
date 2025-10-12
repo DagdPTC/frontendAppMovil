@@ -20,6 +20,20 @@ const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 /* =========================
    AUTH: helpers + gate (añadidos)
    ========================= */
+
+// --- NUEVO: snapshot único del form ---
+const K_FORM_SNAPSHOT = "orders_form_snapshot_v1";
+function readSnap() {
+  try { return JSON.parse(sessionStorage.getItem(K_FORM_SNAPSHOT) || "null"); } catch { return null; }
+}
+function writeSnap(obj) {
+  sessionStorage.setItem(K_FORM_SNAPSHOT, JSON.stringify(obj || {}));
+}
+function clearSnap() {
+  sessionStorage.removeItem(K_FORM_SNAPSHOT);
+}
+
+
 let IS_AUTH = false;
 
 function hasAuth() {
@@ -655,22 +669,20 @@ function closeOrderFormOverlay() {
   overlay?.classList.remove("open");
 }
 
-/* =========================
-   Recargar pedidos + relayout masonry
-   ========================= */
 async function reloadOrdersList() {
   const container = document.getElementById("orders-list");
   if (!container) return;
 
-  showLoader("Cargando pedidos…");
+  showLoader("Cargando pedidos…");     // ← loader SOLO aquí
   container.innerHTML = "";
   try {
-    await cargarPedidosDeApi(container, agregarTarjetaPedido);
+    await cargarPedidosDeApi(container, agregarTarjetaPedido); // ← sin loader adentro
     ensureFilterBar();
   } finally {
     hideLoader();
   }
 }
+
 
 function withScrollFreeze(fn) {
   const x = window.scrollX, y = window.scrollY;
@@ -822,18 +834,55 @@ function setSeleccion(v) { sessionStorage.setItem(K_SEL, JSON.stringify(v || [])
    Snapshots del form
    ========================= */
 function saveFormSnapshot() {
-  localStorage.setItem(K_CLIENTE, ($("#customer-name")?.value || "").trim());
-  localStorage.setItem(K_MESA, $("#table-select")?.value || "");
-  sessionStorage.setItem(K_WAITER, $("#waiter-select")?.value || "");
+  const snap = {
+    name: ($("#customer-name")?.value || "").trim(),
+    mesa: $("#table-select")?.value || "",
+    waiter: $("#waiter-select")?.value || "",
+    estado: $("#status-select")?.value || "",
+    notes: ($("#order-notes")?.value || "").trim()
+  };
+  writeSnap(snap);
 }
-function restoreFormSnapshot() {
-  const name = localStorage.getItem(K_CLIENTE);
-  const mesa = localStorage.getItem(K_MESA);
-  if (name) $("#customer-name").value = name;
-  if (mesa) $("#table-select").value = mesa;
-  localStorage.removeItem(K_CLIENTE);
-  localStorage.removeItem(K_MESA);
+
+async function restoreFormSnapshotAsync() {
+  const snap = readSnap();
+  if (!snap) return;
+
+  // Rellena los campos de texto inmediatamente
+  if ($("#customer-name")) $("#customer-name").value = snap.name || "";
+  if ($("#order-notes"))   $("#order-notes").value   = snap.notes || "";
+  if ($("#status-select")) {
+    if (snap.estado && $("#status-select").querySelector(`option[value="${snap.estado}"]`)) {
+      $("#status-select").value = snap.estado;
+      $("#status-select").dispatchEvent(new Event("change", { bubbles: true }));
+      $("#status-select")._fancy?.sync?.();
+    }
+  }
+
+  // Para waiter y mesa esperamos a que carguen sus catálogos
+  await cargarEmpleados($("#waiter-select"));
+  if ($("#waiter-select") && snap.waiter) {
+    const w = $("#waiter-select");
+    if (w.querySelector(`option[value="${snap.waiter}"]`)) {
+      w.value = snap.waiter;
+      w.dispatchEvent(new Event("change", { bubbles: true }));
+      w._fancy?.sync?.();
+    }
+  }
+
+  await cargarMesasSelect({ allowCurrentId: snap.mesa }); // permite mesa actual si no está “disponible”
+  if ($("#table-select") && snap.mesa) {
+    const t = $("#table-select");
+    // Si la opción existe la seleccionamos, aunque la hayamos marcado como “(actual)”
+    const opt = [...t.options].find(o => o.value === String(snap.mesa));
+    if (opt) {
+      t.value = snap.mesa;
+      t.dispatchEvent(new Event("change", { bubbles: true }));
+      t._fancy?.sync?.();
+    }
+  }
 }
+
 function restoreWaiter(waiterSelect) {
   if (!waiterSelect) return;
   const saved = sessionStorage.getItem(K_WAITER);
@@ -942,6 +991,13 @@ async function cargarMesasSelect(opts = {}) {
   const { allowCurrentId = null } = opts;
   const sel = document.getElementById("table-select");
   if (!sel) return;
+
+  // Estado de carga visible
+  sel.disabled = true;
+  sel.className =
+    "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 text-sm md:text-base bg-white shadow-sm opacity-60";
+  sel.innerHTML = `<option value="" selected>Cargando mesas…</option>`;
+  sel._fancy?.sync?.();
 
   const norm = (s) => String(s ?? "")
     .trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -1054,8 +1110,15 @@ async function cargarMesasSelect(opts = {}) {
     if (o && o.disabled) sel.selectedIndex = 0;
   });
 
+  
+
   upgradeSelect?.(sel, { placeholder: "Mesa" });
+    // ... después de llenar las opciones reales ...
+  sel.disabled = false;
+  sel.classList.remove("opacity-60");
+  sel._fancy?.sync?.();
 }
+
 
 /* =========================
    Normalizador pedido UI
@@ -1889,22 +1952,26 @@ function emptyState(msg) {
 }
 
 async function cargarPedidosDeApi(container, onAddCard) {
-  showLoader("Cargando pedidos…");
   let raw = [];
   try {
     try { raw = await getPedidos(0, 50); }
-    catch (e) { container.innerHTML = emptyState("No se pudieron cargar los pedidos."); return; }
+    catch (e) {
+      container.innerHTML = emptyState("No se pudieron cargar los pedidos.");
+      return;
+    }
 
     const mapped = [];
-    for (const p of raw) { try { mapped.push(fromApi(p)); } catch { } }
+    for (const p of raw) { try { mapped.push(fromApi(p)); } catch {} }
 
     ORDERS_CACHE = mapped;
     renderOrdersList(container, onAddCard);
     ensureFilterBar();
-  } finally {
-    hideLoader();
+  } catch {
+    // evita romper la UI
+    container.innerHTML = emptyState("Ocurrió un error al cargar pedidos.");
   }
 }
+
 
 /* =========================
    Selección + Totales
@@ -2197,10 +2264,17 @@ function hideLoader() {
   if (LOADER_COUNT === 0) host.classList.remove("open");
 }
 
+function forceCloseLoader() {
+  const host = ensureLoaderHost();
+  LOADER_COUNT = 0;
+  host.classList.remove("open");
+}
+
+
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
-  // ====== AUTH GATE (añadido) ======
+  // ====== AUTH GATE ======
   IS_AUTH = hasAuth();
   if (!IS_AUTH) {
     renderAuthGate();
@@ -2215,16 +2289,17 @@ async function init() {
 
   ensureOrderOverlayStyles();
 
-  const ordersList = $("#orders-list");
-  const newOrderBtn = $("#new-order-btn");
-  const newOrderForm = $("#new-order-form");
+  const ordersList      = $("#orders-list");
+  const newOrderBtn     = $("#new-order-btn");
+  const newOrderForm    = $("#new-order-form");
   const backToOrdersBtn = $("#back-to-orders");
-  const orderTime = $("#order-time");
-  const saveOrderBtn = $("#save-order-btn");
-  const addDishesBtn = $("#add-dishes-btn");
-  const waiterSelect = $("#waiter-select");
-  const tableSelect = $("#table-select");
+  const orderTime       = $("#order-time");
+  const saveOrderBtn    = $("#save-order-btn");
+  const addDishesBtn    = $("#add-dishes-btn");
+  const waiterSelect    = $("#waiter-select");
+  const tableSelect     = $("#table-select");
 
+  // Carga inicial
   showLoader("Cargando pedidos…");
   await cargarCatalogos();
   await cargarPedidosDeApi(ordersList, agregarTarjetaPedido);
@@ -2233,7 +2308,8 @@ async function init() {
   await ensureMeInSession({ forceNetwork: true });
   hideLoader();
 
-  newOrderBtn?.addEventListener("click", () => {
+  // === Nuevo pedido ===
+  newOrderBtn?.addEventListener("click", async () => {
     document.getElementById("orders-filters")?.classList.add("hidden");
 
     editingId = null;
@@ -2242,6 +2318,7 @@ async function init() {
     sessionStorage.removeItem(K_EDIT_MESA);
 
     clearSnapshots();
+    clearSnap?.(); // limpia snapshot completo
     resetOrderForm();
 
     newOrderForm.classList.remove("hidden");
@@ -2249,12 +2326,15 @@ async function init() {
     newOrderBtn.classList.add("hidden");
     if (orderTime) orderTime.value = new Date().toLocaleDateString("es-ES");
 
-    cargarEmpleados(waiterSelect);
-    cargarMesasSelect();
-
+    // ⬇️ Abrir overlay INMEDIATO para que el form quede por encima mientras cargan mesas
     openOrderFormOverlay();
+
+    // Luego cargar catálogos
+    await cargarEmpleados(waiterSelect);
+    await cargarMesasSelect();
   });
 
+  // === Volver a la lista ===
   backToOrdersBtn?.addEventListener("click", () => {
     document.getElementById("orders-filters")?.classList.remove("hidden");
 
@@ -2262,12 +2342,14 @@ async function init() {
     ordersList.classList.remove("hidden");
     newOrderBtn.classList.remove("hidden");
 
-    setSeleccion([]); renderSeleccionUI();
+    setSeleccion([]);
+    renderSeleccionUI();
     editingId = null;
 
     sessionStorage.removeItem(K_EDIT_ID);
     sessionStorage.removeItem(K_EDIT_EMP);
     sessionStorage.removeItem(K_EDIT_MESA);
+    clearSnap?.();
 
     const saveBtn = $("#save-order-btn");
     if (saveBtn) saveBtn.textContent = "Guardar pedido";
@@ -2275,8 +2357,9 @@ async function init() {
     closeOrderFormOverlay();
   });
 
+  // === Seleccionar platillos ===
   addDishesBtn?.addEventListener("click", () => {
-    saveFormSnapshot();
+    saveFormSnapshot();                     // guarda TODO el form
     sessionStorage.setItem(K_OPEN_FORM, "1");
 
     if (Number.isFinite(Number(editingId)) && editingId > 0) {
@@ -2287,88 +2370,89 @@ async function init() {
 
     const back = (location.pathname.split("/").pop() || "orders.html") + "#new";
     showLoader("Cargando platillos…");
-    setTimeout(() => { window.location.href = `menu.html?select=1&back=${encodeURIComponent(back)}`; }, 90);
+    setTimeout(() => {
+      window.location.href = `menu.html?select=1&back=${encodeURIComponent(back)}`;
+    }, 90);
   });
 
+  // === Guardar ===
   saveOrderBtn?.addEventListener("click", async (e) => {
-    e.preventDefault();
-    try {
-      if (!ESTADOS_ORDER.length) await cargarEstadosYSelect();
-      showLoader(editingId == null ? "Agregando un pedido…" : "Actualizando pedido…");
+  e.preventDefault();
 
-      if (editingId == null) await crearPedidoDesdeSeleccion();
-      else { await actualizarPedido(editingId); editingId = null; }
-      hideLoader();
+  try {
+    if (!ESTADOS_ORDER.length) await cargarEstadosYSelect();
 
-      sessionStorage.removeItem(K_EDIT_ID);
-      sessionStorage.removeItem(K_EDIT_EMP);
-      sessionStorage.removeItem(K_EDIT_MESA);
-      editingOriginalMesaId = null;
-      editingOriginalPlatillos = new Set();
-
-      resetOrderForm();
-      closeOrderFormOverlay();
-
-      showLoader("Cargando la tabla…");
-      newOrderForm.classList.add("hidden");
-      ordersList.classList.remove("hidden");
-      newOrderBtn.classList.remove("hidden");
-
-      await reloadOrdersList();
-      await cargarMesasSelect();
-
-      hideLoader();
-      showAlert("success", "Operación realizada correctamente");
-    } catch (err) {
-      hideLoader();
-      if (err && err.message !== "VALIDATION") showAlert("error", err.message || "No se pudo guardar el pedido");
-      console.error(err);
+    // Guardar (crear/actualizar)
+    showLoader(editingId == null ? "Agregando un pedido…" : "Actualizando pedido…");
+    if (editingId == null) {
+      await crearPedidoDesdeSeleccion();
+    } else {
+      await actualizarPedido(editingId);
+      editingId = null;
     }
-  });
+    hideLoader();
 
+    // Limpieza de estado de edición y form
+    sessionStorage.removeItem(K_EDIT_ID);
+    sessionStorage.removeItem(K_EDIT_EMP);
+    sessionStorage.removeItem(K_EDIT_MESA);
+    editingOriginalMesaId = null;
+    editingOriginalPlatillos = new Set();
+    clearSnap?.();
+
+    resetOrderForm();
+    closeOrderFormOverlay();
+
+    // Volver a la lista + recargar pedidos (loader solo en reloadOrdersList)
+    newOrderForm.classList.add("hidden");
+    ordersList.classList.remove("hidden");
+    newOrderBtn.classList.remove("hidden");
+
+    await reloadOrdersList();      // ← ya maneja su propio loader
+    await cargarMesasSelect();     // ← sin loader interno
+
+    // ALERTA personalizada
+    showAlert("success", "Operación realizada correctamente");
+  } catch (err) {
+    if (err && err.message !== "VALIDATION") {
+      showAlert("error", err.message || "No se pudo guardar el pedido");
+    }
+    console.error(err);
+  } finally {
+    // cinturón y tirantes: asegura que nunca quede “abierto”
+    forceCloseLoader();
+  }
+});
+
+
+  // === Volver desde menú de platillos o abrir con #new ===
   if (sessionStorage.getItem(K_OPEN_FORM) === "1" || location.hash === "#new") {
     document.getElementById("orders-filters")?.classList.add("hidden");
-
-    const newOrderForm = $("#new-order-form");
-    const ordersList = $("#orders-list");
-    const newOrderBtn = $("#new-order-btn");
-    const waiterSelect = $("#waiter-select");
-    const tableSelect = $("#table-select");
 
     newOrderForm.classList.remove("hidden");
     ordersList.classList.add("hidden");
     newOrderBtn.classList.add("hidden");
     if (orderTime) orderTime.value = new Date().toLocaleDateString("es-ES");
 
+    // ⬇️ Mover el form al overlay ANTES de cargar/ restaurar, así siempre queda arriba
+    openOrderFormOverlay();
+
     showLoader("Cargando los platillos seleccionados…");
-    restoreFormSnapshot();
+
+    if (!ESTADOS_ORDER.length) await cargarEstadosYSelect();
+
+    // Restaura TODO el formulario (nombre, estado, notas, mesero, mesa…)
+    await restoreFormSnapshotAsync();
     renderSeleccionUI();
 
     const storedEditId = Number(sessionStorage.getItem(K_EDIT_ID) || "");
-    const storedEmpId = Number(sessionStorage.getItem(K_EDIT_EMP) || "");
-    const storedMesaId = Number(sessionStorage.getItem(K_EDIT_MESA) || "");
-
     if (Number.isFinite(storedEditId) && storedEditId > 0) {
       editingId = storedEditId;
-
       const saveBtn2 = $("#save-order-btn");
       if (saveBtn2) saveBtn2.textContent = "Actualizar pedido";
-
-      await cargarEmpleados(waiterSelect, { initialId: storedEmpId || undefined });
-      await cargarMesasSelect({ allowCurrentId: storedMesaId || undefined });
-
-      if (storedMesaId && tableSelect) {
-        tableSelect.value = String(storedMesaId);
-        tableSelect.dispatchEvent(new Event("change", { bubbles: true }));
-        if (tableSelect._fancy?.sync) tableSelect._fancy.sync();
-      }
-    } else {
-      await cargarEmpleados(waiterSelect);
-      await cargarMesasSelect();
     }
 
     sessionStorage.removeItem(K_OPEN_FORM);
-    openOrderFormOverlay();
     hideLoader();
   } else {
     renderSeleccionUI();
@@ -2385,6 +2469,8 @@ async function init() {
     }
   }, 1500);
 }
+
+
 
 function markInvalid(id) {
   const el = document.getElementById(id);
