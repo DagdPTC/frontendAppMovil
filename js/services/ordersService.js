@@ -26,13 +26,20 @@ console.log("[ordersService exact] loaded");
 function pad2(n){ return String(n).padStart(2, "0"); }
 function toApiDateTime(d) {
   const dt = d instanceof Date ? d : new Date(d);
-  const y = dt.getFullYear();
-  const m = pad2(dt.getMonth() + 1);
-  const day = pad2(dt.getDate());
-  const hh = pad2(dt.getHours());
-  const mm = pad2(dt.getMinutes());
-  const ss = pad2(dt.getSeconds());
-  return `${y}-${m}-${day}T${hh}:${mm}:${ss}`;
+  const pad = (n) => String(n).padStart(2, "0");
+  
+  // Convertir a UTC
+  const offset = dt.getTimezoneOffset() * 60000;
+  const utcDate = new Date(dt.getTime() + offset);
+  
+  const y = utcDate.getUTCFullYear();
+  const m = pad(utcDate.getUTCMonth() + 1);
+  const day = pad(utcDate.getUTCDate());
+  const hh = pad(utcDate.getUTCHours());
+  const mm = pad(utcDate.getUTCMinutes());
+  const ss = pad(utcDate.getUTCSeconds());
+  
+  return `${y}-${m}-${day}T${hh}:${mm}:${ss}Z`;
 }
 
 

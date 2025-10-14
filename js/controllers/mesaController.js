@@ -2,6 +2,8 @@
 // Reemplaza COMPLETO este archivo
 
 import { getMesas, fetchPedidosAll } from "../services/mesaService.js";
+import { getAuthToken } from "../services/apiConfig.js";
+
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -16,6 +18,27 @@ const norm = (s) => String(s ?? "")
   .toLowerCase()
   .normalize("NFD")
   .replace(/[\u0300-\u036f]/g, "");
+
+
+  async function ensureMeInSession({ forceNetwork = true } = {}) {
+  const url = `${API_HOST}/api/auth/me`;
+  const headers = new Headers({ Accept: "application/json" });
+  const token = getAuthToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  try {
+    const res = await fetch(url, {
+      credentials: "include",
+      cache: forceNetwork ? "no-store" : "default",
+      headers,
+    });
+    if (!res.ok) return null;
+    return await res.json().catch(() => null);
+  } catch {
+    return null;
+  }
+}
+
 
 function pickArrayPayload(data) {
   if (Array.isArray(data?.content)) return data.content;
@@ -647,7 +670,36 @@ function stopAutoRefresh() {
 document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
-  _mesasContainer = $("#mesas-grid") || $("#tables-grid") || $("#mesas-container") || $("#tables-list") || $("#mesas-list");
+  const gate = document.getElementById("auth-gate");
+  const content = document.getElementById("mesas-auth-content");
+
+  // === 0) Validar sesión como en Pedidos ===
+  try {
+    const me = await ensureMeInSession({ forceNetwork: true });
+    if (!me) {
+      // sin sesión → mostramos gate y NO seguimos
+      if (content) content.hidden = true;
+      if (gate) gate.hidden = false;
+      return;
+    }
+  } catch {
+    if (content) content.hidden = true;
+    if (gate) gate.hidden = false;
+    return;
+  }
+
+  // Sesión OK → mostramos contenido real
+  if (gate) gate.hidden = true;
+  if (content) content.hidden = false;
+
+  // === 1) El resto de tu init original (igual que lo tenías) ===
+  _mesasContainer =
+    document.querySelector("#mesas-grid") ||
+    document.querySelector("#tables-grid") ||
+    document.querySelector("#mesas-container") ||
+    document.querySelector("#tables-list") ||
+    document.querySelector("#mesas-list");
+
   if (!_mesasContainer) {
     console.warn("[Mesas] No se encontró el contenedor (#mesas-grid | #tables-grid | #mesas-container | #tables-list | #mesas-list).");
     return;
@@ -665,8 +717,8 @@ async function init() {
     }
   });
 
-  // Si otra vista cambia pedidos, refrescar si es seguro
   window.addEventListener("pedido:cambiado", () => {
     if (FS_OPEN_COUNT === 0 && BUSY_COUNT === 0) renderMesasGrid(_mesasContainer);
   });
 }
+

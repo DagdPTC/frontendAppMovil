@@ -1,7 +1,7 @@
 // js/utils/authGuard.js
 // Utilidad simple para bloquear vistas si no hay token en sessionStorage
 
-import { getAuthToken } from "..//services/apiConfig.js";
+import { getAuthToken } from "../services/apiConfig.js";
 
 /**
  * Muestra/oculta el gate y el contenido real según exista token.

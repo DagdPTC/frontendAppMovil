@@ -12,7 +12,7 @@ import {
 } from "../services/ordersService.js";
 import { getPlatillos } from "../services/menuService.js";
 
-const K_MESA_SNAP = "mesaSnapshotPending";
+const K_MESA_SNAP = "mesaSnapshotPending";  
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -54,6 +54,55 @@ let VIEW_MODE = (() => {
 /* ===========================================================
    FANCY SELECT (chips + búsqueda + animación, accesible)
    =========================================================== */
+
+
+// ====== SOLO HOY (móvil) ======
+const ONLY_TODAY_MODE = true; // En móvil: true. En web (historial): false.
+
+/** YYYY-MM-DD del "hoy" local */
+function todayYMD() {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+function ymdFromRaw(raw) {
+  if (!raw) return null;
+  const s = String(raw);
+
+  // Si ya trae YYYY-MM-DD al inicio, lo usamos (pero necesitamos verificar si es UTC)
+  const directMatch = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (directMatch && !s.includes("T")) {
+    // Es solo fecha, sin hora → devolverla tal cual
+    return directMatch[1];
+  }
+
+  // Si es ISO con zona (UTC o con offset), parsear correctamente
+  const d = parseApiDate(raw);
+  if (!d) return null;
+
+  // Convertir a fecha LOCAL (si venía como UTC, ya está convertida por parseApiDate)
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+/** Reprograma la recarga justo al cambiar el día (00:00:05) */
+function scheduleMidnightRefresh() {
+  const now = new Date();
+  const next = new Date(now);
+  // 00:00:05 del día siguiente
+  next.setHours(24, 0, 5, 0);
+  const ms = next.getTime() - now.getTime();
+  setTimeout(() => {
+    reloadOrdersList();        // vuelve a pedir + vuelve a filtrar
+    scheduleMidnightRefresh(); // programa el siguiente cambio de día
+  }, Math.max(1000, ms));
+}
+
+
+
 function upgradeSelect(nativeSelect, opts = {}) {
   if (!nativeSelect || nativeSelect._fancy) return;
   const multiple = nativeSelect.hasAttribute("multiple") || !!opts.multiple;
@@ -433,6 +482,8 @@ function showConfirm({ title = "Confirmar", message = "", confirmText = "Aceptar
     card.querySelector(".btn-ok").addEventListener("click", () => cleanup(true));
   });
 }
+
+
 
 /* =========================
    Helpers: limpiar / snapshots / locks mesas / API mesa
@@ -940,9 +991,6 @@ function getEstadoMesaNormalized(m) {
   return "desconocido";
 }
 
-// Carga mesas con estado real
-// Carga mesas con estado real (robusto si pedidos/estados fallan)
-// Carga mesas con estado real (robusto si pedidos/estados fallan)
 // Carga mesas con estado real (robusto si pedidos/estados fallan)
 async function cargarMesasSelect(opts = {}) {
   const { allowCurrentId = null } = opts;
@@ -976,6 +1024,9 @@ async function cargarMesasSelect(opts = {}) {
 
   let mesas = [], estadosMesa = [], pedidos = [], estadosPed = [];
 
+  // 👉 NUEVO: leer bloqueos locales (para deshabilitar incluso si el backend aún no refleja el cambio)
+  const lockedSet = getLockedSet();
+
   // === Mesas ===
   try {
     const r = await fetch(urlMesas, { credentials: "include" });
@@ -984,6 +1035,34 @@ async function cargarMesasSelect(opts = {}) {
       mesas = Array.isArray(d?.content) ? d.content : (Array.isArray(d) ? d : []);
     }
   } catch (e) { console.error("[Mesas] Error obteniendo mesas:", e); }
+
+  // ===== Pedido -> EstadoMesa (GLOBAL) =====
+  function normEstadoStr(s) {
+    return String(s || "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+  /** true si el pedido está cerrado (libera mesa) */
+  function isPedidoCerradoNombre(nombreEstadoPedido) {
+    const s = normEstadoStr(nombreEstadoPedido);
+    return (
+      s.includes("final") ||
+      s.includes("cancel") ||
+      s.includes("anul") ||
+      s.includes("rechaz") ||
+      s.includes("pag")   // pagado/pagada
+    );
+  }
+  /** Mapea estado de pedido a idEstadoMesa: 1=disponible, 2=ocupada, 3=reservada */
+  function mesaEstadoIdForPedidoNombre(nombreEstadoPedido) {
+    const s = normEstadoStr(nombreEstadoPedido);
+    if (isPedidoCerradoNombre(s)) return 1;            // disponible
+    if (s.includes("pend") || s.includes("reserv")) return 3; // reservada
+    if (s.includes("prep") || s.includes("entreg")) return 2; // ocupada
+    return 2; // por defecto, no-cerrado → ocupada
+  }
 
   // === Catálogo estados de mesa ===
   try {
@@ -1026,22 +1105,11 @@ async function cargarMesasSelect(opts = {}) {
   for (const e of estadosMesa) {
     if (norm(nomEstadoM(e)).includes("dispon")) { idDisponible = getId(e); break; }
   }
-
   if (idDisponible == null) {
     console.warn("[Mesas] No se encontró estado 'Disponible' en el catálogo. Se mostrarán todas como no seleccionables.");
   }
 
-  // === AQUÍ el cambio: "pagado" también se considera cerrado ===
-  const esPedidoCerrado = (nombre) => {
-    const s = norm(nombre);
-    return (
-      s.includes("final") ||
-      s.includes("cancel") ||
-      s.includes("anul") ||
-      s.includes("rechaz")
-    );
-  };
-
+  const esPedidoCerrado = (nombre) => isPedidoCerradoNombre(nombre);
   const mesasConPedidoActivo = new Set(
     (pedidos || [])
       .filter(p => !esPedidoCerrado(MAP_ID_ESTADO_PED_NOMBRE.get(Number(p.idEstadoPedido ?? p.IdEstadoPedido)) || ""))
@@ -1060,7 +1128,16 @@ async function cargarMesasSelect(opts = {}) {
 
     // si hay pedido activo sobre esa mesa, fuerza "Ocupada"
     const estadoEfectivo = mesasConPedidoActivo.has(id) ? "Ocupada" : nomEst;
-    let habilitada = (idDisponible != null) && (idEst === idDisponible) && !mesasConPedidoActivo.has(id);
+
+    // 👉 NUEVO: considerar bloqueo local (además de lo que diga el backend y pedidos)
+    const lockedLocal = lockedSet.has(String(id));
+
+    let habilitada =
+      (idDisponible != null) &&
+      (idEst === idDisponible) &&
+      !mesasConPedidoActivo.has(id) &&
+      !lockedLocal; // 👈 agrega el bloqueo local
+
     let etiqueta = `${nombre} — ${Cap(estadoEfectivo)}`;
 
     if (allowCurrentId && Number(allowCurrentId) === id && !habilitada) {
@@ -1072,7 +1149,7 @@ async function cargarMesasSelect(opts = {}) {
     const opt = new Option(etiqueta, String(id), false, false);
     opt.dataset.estado = norm(estadoEfectivo);
     opt.disabled = !habilitada;
-    if (!habilitada) opt.title = `No seleccionable: ${Cap(estadoEfectivo)}`;
+    if (!habilitada) opt.title = `No seleccionable: ${Cap(estadoEfectivo)}${lockedLocal ? " (bloqueada)" : ""}`;
     sel.appendChild(opt);
   }
 
@@ -1083,6 +1160,7 @@ async function cargarMesasSelect(opts = {}) {
 
   upgradeSelect?.(sel, { placeholder: "Mesa" });
 }
+
 
 
 
@@ -1327,8 +1405,8 @@ function aplicarFiltros(arr) {
   const q = bar.querySelector("#f-q").value.trim().toLowerCase();
   const estado = bar.querySelector("#f-estado").value;
   const mesa = bar.querySelector("#f-mesa").value;
-  const desde = bar.querySelector("#f-desde").value;
-  const hasta = bar.querySelector("#f-hasta").value;
+  const desde = bar.querySelector("#f-desde").value; // "YYYY-MM-DD"
+  const hasta = bar.querySelector("#f-hasta").value; // "YYYY-MM-DD"
 
   return arr.filter(p => {
     if (q) {
@@ -1339,19 +1417,17 @@ function aplicarFiltros(arr) {
     if (estado && Number(estado) !== Number(p.idEstadoPedido)) return false;
     if (mesa && String(mesa) !== String(p.Mesa || p.idMesa || "")) return false;
 
-    if (desde) {
-      const d = new Date((p.Hora || "").replace(" ", "T"));
-      const min = new Date(desde + "T00:00:00");
-      if (isNaN(d) || d < min) return false;
-    }
-    if (hasta) {
-      const d = new Date((p.Hora || "").replace(" ", "T"));
-      const max = new Date(hasta + "T23:59:59");
-      if (isNaN(d) || d > max) return false;
-    }
+    // --- AQUÍ el cambio: comparar por YYYY-MM-DD, no por Date ---
+    const ymd = ymdFromRaw(p.Hora); // e.g. "2025-10-13"
+    if (!ymd) return false;         // si no se puede leer, lo excluimos
+
+    if (desde && ymd < desde) return false;  // inclusivo desde 00:00
+    if (hasta && ymd > hasta) return false;  // inclusivo hasta 23:59
+
     return true;
   });
 }
+
 
 function renderOrdersList(container, onAddCard) {
   const list = aplicarFiltros(ORDERS_CACHE);
@@ -1524,15 +1600,65 @@ function ensureMasonryResizeHandler(container) {
 
 
 // === Helpers visuales para las tarjetas ===
-function fmtMoney(n) { return Number(n || 0).toFixed(2); }
-function fmtFechaCorta(s) {
-  if (!s) return "-";
-  try {
-    const d = (s instanceof Date) ? s : new Date(String(s).replace(" ", "T"));
-    if (Number.isNaN(d.getTime())) return String(s);
-    return d.toLocaleString("es-ES", { dateStyle: "medium", timeStyle: "short" });
-  } catch { return String(s); }
+
+// === Utilidades de fecha para API (maneja UTC sin marca) ===
+function _hasTimezoneMark(s) {
+  // …Z o ±hh:mm / ±hhmm al final
+  return /[zZ]|[+\-]\d{2}:?\d{2}$/.test(s);
 }
+
+function parseApiDate(raw) {
+  if (!raw) return null;
+  if (raw instanceof Date) return raw;
+
+  const s0 = String(raw).trim().replace(" ", "T");
+
+  // Epoch en milisegundos
+  if (/^\d{13}$/.test(s0)) return new Date(Number(s0));
+
+  // Epoch en segundos
+  if (/^\d{10}$/.test(s0)) return new Date(Number(s0) * 1000);
+
+  // Solo fecha (sin hora)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s0)) {
+    const [y, m, d] = s0.split("-").map(Number);
+    return new Date(y, m - 1, d, 0, 0, 0, 0); // LOCAL
+  }
+
+  // Si tiene "Z" al final, es UTC
+  if (s0.endsWith("Z") || s0.endsWith("z")) {
+    // Parsear como UTC y convertir a LOCAL para mostrar correctamente
+    const d = new Date(s0);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // Si tiene ±hh:mm de zona horaria (ej: "2025-10-13T22:07:56-06:00")
+  const tzMatch = s0.match(/([+\-]\d{2}):?(\d{2})$/);
+  if (tzMatch) {
+    const d = new Date(s0);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  // Sin zona horaria: parsear como LOCAL (no UTC)
+  const [datePart, timePart = "00:00:00"] = s0.split("T");
+  const [y, m, d] = datePart.split("-").map(Number);
+  const [hh, mi, ss = "0"] = timePart.split(":");
+  return new Date(y, (m || 1) - 1, d || 1, Number(hh) || 0, Number(mi) || 0, Number(ss) || 0);
+}
+
+
+function fmtMoney(n) { return Number(n || 0).toFixed(2); }
+function fmtFechaCorta(value) {
+  const d = parseApiDate(value);
+  if (!d) return String(value || "-");
+  try {
+    return d.toLocaleString("es-ES", { dateStyle: "medium", timeStyle: "short" });
+  } catch {
+    return d.toLocaleString();
+  }
+}
+
+
 function getEmpleadoNombre(idEmp) {
   const me = (() => {
     try { return JSON.parse(sessionStorage.getItem("ord_user") || "null"); } catch { return null; }
@@ -1676,6 +1802,22 @@ function agregarTarjetaPedido(pedido, container) {
   const estadoNombre = pedido.Estado || MAP_ESTADOS.get(Number(pedido.idEstadoPedido))?.nombre || "-";
   const badgeCls = badgeColorForEstado(estadoNombre);
   const accent = accentForEstado(estadoNombre);
+
+  // helper local por si el proyecto no tiene la función global disponible
+  function computeLocalMesaEstadoId(nombreEstadoPedido = "") {
+    const s = String(nombreEstadoPedido)
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+    const cerrado =
+      s.includes("final") || s.includes("cancel") || s.includes("anul") ||
+      s.includes("rechaz") || s.includes("pag");
+
+    if (cerrado) return 1;        // Disponible
+    if (s.includes("reserv")) return 3; // Reservada
+    return 2;                     // Ocupada (pendiente / preparando / entregando ...)
+  }
 
   const esCerrado = (id, nombre) => {
     const n = (nombre || "").toLowerCase();
@@ -1829,7 +1971,10 @@ function agregarTarjetaPedido(pedido, container) {
       hideLoader();
 
       const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
-      if (idMesa) await liberarMesa(idMesa);
+      if (idMesa) {
+        await liberarMesa(idMesa);
+        try { unlockMesaLocal(idMesa); } catch {}
+      }
 
       showAlert("success", "Pedido eliminado correctamente");
     } catch (e) {
@@ -1878,6 +2023,28 @@ function agregarTarjetaPedido(pedido, container) {
       });
       hideLoader();
 
+      // === Sincroniza el estado de la mesa en BD
+      try {
+        if (!MAP_ESTADOS.size) await cargarEstadosYSelect();
+        const nombreNuevo = MAP_ESTADOS.get(newId)?.nombre || "";
+        const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
+        if (idMesa) {
+          const idEstadoMesaNuevo = (typeof mesaEstadoIdForPedidoNombre === "function")
+            ? mesaEstadoIdForPedidoNombre(nombreNuevo)
+            : computeLocalMesaEstadoId(nombreNuevo);
+
+          await tryUpdateMesaEstado(idMesa, idEstadoMesaNuevo);
+
+          // Bloqueo local coherente con el estado del pedido
+          const s = String(nombreNuevo).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          const cerrado = s.includes("final") || s.includes("cancel") || s.includes("anul") || s.includes("rechaz") || s.includes("pag");
+          try {
+            if (cerrado) unlockMesaLocal(idMesa);
+            else lockMesaLocal(idMesa);
+          } catch {}
+        }
+      } catch { /* best-effort */ }
+
       showLoader("Cargando la tabla…");
       await reloadOrdersList();
       hideLoader();
@@ -1891,6 +2058,7 @@ function agregarTarjetaPedido(pedido, container) {
     }
   });
 }
+
 
 
 
@@ -1992,13 +2160,21 @@ async function cargarPedidosDeApi(container, onAddCard) {
     const mapped = [];
     for (const p of raw) { try { mapped.push(fromApi(p)); } catch { } }
 
-    ORDERS_CACHE = mapped;
+    // << SOLO HOY >>
+    let list = mapped;
+    if (ONLY_TODAY_MODE) {
+      const hoy = todayYMD();
+      list = mapped.filter(p => ymdFromRaw(p.Hora) === hoy);
+    }
+
+    ORDERS_CACHE = list;
     renderOrdersList(container, onAddCard);
     ensureFilterBar();
   } finally {
     hideLoader();
   }
 }
+
 
 
 /* =========================
@@ -2222,29 +2398,50 @@ function buildPayloadsFromSelection() {
 
 
 
-/* =========================
-   Crear / Actualizar
-   ========================= */
 async function crearPedidoDesdeSeleccion() {
+  // 1) Armar payload y crear el pedido
   const body = buildPayloadsFromSelection();
   await createPedido(body);
 
+  // 2) Bloquear/ajustar estado de la mesa según el estado del pedido
   const idMesa = Number(body.idMesa || 0);
-  const idEstado = Number(body.idEstadoPedido || 0);
+  const idEstadoPedido = Number(body.idEstadoPedido || 0);
 
-  if (idMesa) {
-    const nombreEstado = (MAP_ESTADOS.get(Number(idEstado))?.nombre || "").toLowerCase();
-    const cerrado = nombreEstado.includes("final") ||
-      nombreEstado.includes("cancel") ||
-      nombreEstado.includes("anul") ||
-      nombreEstado.includes("rechaz");
-    if (cerrado) {
-      await liberarMesa(idMesa);
-    } else {
-      await ocuparMesa(idMesa);
+  if (idMesa && Number.isFinite(idEstadoPedido)) {
+    // Tomamos el nombre del estado del pedido (por ejemplo: "pendiente")
+    const nombreEstado = (MAP_ESTADOS.get(idEstadoPedido)?.nombre || "").toString();
+
+    // Normalizamos para comparar
+    const s = nombreEstado
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+    // Cerrados => mesa disponible (1)
+    const esCerrado =
+      s.includes("final") ||
+      s.includes("cancel") ||
+      s.includes("anul") ||
+      s.includes("rechaz") ||
+      s.includes("pag");
+
+    // Regla: pendiente => ocupada (2), reservada => 3, cerrados => 1, resto => 2
+    const idEstadoMesa =
+      esCerrado ? 1 :
+        s.includes("reserv") ? 3 :
+          2; // pendiente / preparando / entregando => ocupada
+
+    try {
+      await tryUpdateMesaEstado(idMesa, idEstadoMesa);
+      // opcional: también guardamos lock local para otras pantallas
+      try { lockMesaLocal?.(idMesa); } catch { }
+    } catch {
+      // si falla el PATCH, no rompemos el guardado del pedido
+      console.warn("[crearPedidoDesdeSeleccion] No se pudo actualizar el estado de la mesa.");
     }
   }
 }
+
 
 
 async function actualizarPedido(editId) {
@@ -2255,21 +2452,29 @@ async function actualizarPedido(editId) {
 
   const mesaAntes = Number(editingOriginalMesaId || 0);
   const nuevaMesaId = Number(body.idMesa || 0);
-  const nombreEstado = (MAP_ESTADOS.get(Number(body.idEstadoPedido))?.nombre || "").toLowerCase();
-  const cerrado = nombreEstado.includes("final")
-    || nombreEstado.includes("cancel")
-    || nombreEstado.includes("anul")
-    || nombreEstado.includes("rechaz");
 
-  // Si cambió de mesa, liberar la anterior
+  const nombreEstado = (MAP_ESTADOS.get(Number(body.idEstadoPedido))?.nombre || "");
+  const idEstadoMesaNuevo = mesaEstadoIdForPedidoNombre(nombreEstado);
+
+  // 👉 NUEVO: calc. rápido si el pedido quedó "cerrado"
+  const s = nombreEstado.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const cerrado = s.includes("final") || s.includes("cancel") || s.includes("anul") || s.includes("rechaz") || s.includes("pag");
+
+  // Si cambió de mesa, libera la anterior
   if (mesaAntes && nuevaMesaId && mesaAntes !== nuevaMesaId) {
     try { await liberarMesa(mesaAntes); } catch { }
+    // 👉 NUEVO: liberar bloqueo local de la mesa anterior
+    try { unlockMesaLocal(mesaAntes); } catch {}
   }
 
-  // Regla de ocupada/libre según estado (sin IDs mágicos)
+  // Aplica el estado correcto a la mesa nueva
   if (nuevaMesaId) {
-    if (cerrado) { try { await liberarMesa(nuevaMesaId); } catch { } }
-    else { try { await ocuparMesa(nuevaMesaId); } catch { } }
+    try { await tryUpdateMesaEstado(nuevaMesaId, idEstadoMesaNuevo); } catch { }
+    // 👉 NUEVO: aplicar bloqueo local coherente a la mesa nueva
+    try {
+      if (cerrado) unlockMesaLocal(nuevaMesaId);
+      else lockMesaLocal(nuevaMesaId);
+    } catch {}
   }
 
   // Limpieza de estado de edición
@@ -2278,6 +2483,7 @@ async function actualizarPedido(editId) {
   editingOriginalLinesByPlatillo = new Map();
   editingMaxIdDetalle = 0;
 }
+
 
 
 /* =========================
@@ -2339,11 +2545,12 @@ function showLoader(message = "Cargando…") {
   host.classList.add("open");
 }
 
-function hideLoader() {
+function hideLoader(force = false) {
   const host = ensureLoaderHost();
-  LOADER_COUNT = Math.max(0, LOADER_COUNT - 1);
+  LOADER_COUNT = force ? 0 : Math.max(0, LOADER_COUNT - 1);
   if (LOADER_COUNT === 0) host.classList.remove("open");
 }
+
 
 // === GATE DE AUTENTICACIÓN (Pedidos) ===
 function renderAuthGate() {
@@ -2413,6 +2620,8 @@ async function init() {
   await cargarMesasSelect();
   await ensureMeInSession({ forceNetwork: true }); // (se mantiene; no cambia funcionalidad)
   hideLoader();
+  forceUnlockScroll();
+
 
   // 3) Abrir “nuevo pedido”
   newOrderBtn?.addEventListener("click", () => {
@@ -2458,9 +2667,10 @@ async function init() {
 
     // Cerrar overlay
     closeOrderFormOverlay();
+    forceUnlockScroll();
+
   });
 
-  // 5) Ir a seleccionar platillos (loader mientras abre el menú)
   addDishesBtn?.addEventListener("click", () => {
     saveFormSnapshot();
     sessionStorage.setItem(K_OPEN_FORM, "1");
@@ -2472,11 +2682,10 @@ async function init() {
     }
 
     const back = (location.pathname.split("/").pop() || "orders.html") + "#new";
-    showLoader("Cargando platillos…");
-    setTimeout(() => {
-      window.location.href = `menu.html?select=1&back=${encodeURIComponent(back)}`;
-    }, 90);
+    // ¡Sin showLoader aquí!
+    window.location.href = `menu.html?select=1&back=${encodeURIComponent(back)}`;
   });
+
 
   // 6) Guardar (crear/actualizar) + recargar lista + cerrar overlay (con loaders)
   saveOrderBtn?.addEventListener("click", async (e) => {
@@ -2505,6 +2714,8 @@ async function init() {
 
       // Cerrar overlay primero
       closeOrderFormOverlay();
+      forceUnlockScroll();
+
 
       // Mostrar loader mientras recargamos tabla y select de mesas
       showLoader("Cargando la tabla…");
@@ -2517,6 +2728,11 @@ async function init() {
 
       hideLoader();
       showAlert("success", "Operación realizada correctamente");
+
+      // << SOLO HOY >> programa el “reset” diario
+      if (ONLY_TODAY_MODE) {
+        scheduleMidnightRefresh();
+      }
     } catch (err) {
       hideLoader();
       if (err && err.message !== "VALIDATION") {
@@ -2597,16 +2813,19 @@ function markInvalid(id) {
   setTimeout(() => el.classList.remove("ring-2", "ring-red-500"), 1500);
 }
 
-// Fecha/hora local en formato ISO sin milisegundos, ideal para LocalDateTime en el backend
 function formatDateTimeForApi(d = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
+
+  // SOLUCIÓN: Enviar la fecha/hora LOCAL sin conversión a UTC
+  // El backend la interpretará como está (LocalDateTime en Java)
   const yyyy = d.getFullYear();
   const mm = pad(d.getMonth() + 1);
   const dd = pad(d.getDate());
   const hh = pad(d.getHours());
   const mi = pad(d.getMinutes());
   const ss = pad(d.getSeconds());
-  // "2025-09-24T12:34:56"
+
+  // Formato sin zona horaria (LocalDateTime): "2025-10-13T22:55:00"
   return `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}`;
 }
 
@@ -2617,3 +2836,24 @@ function todayISODate() {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${d.getFullYear()}-${mm}-${dd}`;
 }
+
+function forceUnlockScroll() {
+  // Quita cualquier bloqueo de scroll del body
+  document.documentElement.style.overflowY = "auto";
+  document.body.style.overflowY = "auto";
+
+  // Cierra overlays si por alguna razón quedaron abiertos
+  const gl = document.getElementById("global-loader");
+  if (gl) { LOADER_COUNT = 0; gl.classList.remove("open"); }
+
+  document.getElementById("order-overlay")?.classList.remove("open");
+  document.getElementById("f-overlay")?.classList.remove("open");
+  document.getElementById("f-panel")?.classList.remove("open");
+  document.querySelectorAll(".fs-portal-panel.open")
+    .forEach(p => p.classList.remove("open"));
+}
+
+// Llamadas seguras
+window.addEventListener("pageshow", forceUnlockScroll);
+window.addEventListener("focus", forceUnlockScroll);
+
