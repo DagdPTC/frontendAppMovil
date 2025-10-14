@@ -1,6 +1,71 @@
 // js/controllers/menuController.js
 import { getCategorias, getPlatillos, getSessionUser, isAuthError } from "../services/menuService.js";
 
+/* =========================
+   LOADER GLOBAL (overlay con mensajes)
+   ========================= */
+let LOADER_COUNT = 0;
+
+function ensureLoaderHost() {
+  let host = document.getElementById("global-loader");
+  if (host) return host;
+
+  // estilos del loader (una sola vez)
+  if (!document.getElementById("global-loader-styles")) {
+    const st = document.createElement("style");
+    st.id = "global-loader-styles";
+    st.textContent = `
+      #global-loader{
+        position: fixed; inset: 0; z-index: 99999; display: none;
+        align-items: center; justify-content: center;
+        background: rgba(0,0,0,.35); backdrop-filter: blur(1.5px);
+      }
+      #global-loader.open{ display:flex; }
+      #global-loader .panel{
+        min-width: 260px; max-width: 90vw;
+        background:#fff; color:#111; border-radius:14px; border:1px solid #e5e7eb;
+        box-shadow: 0 24px 64px rgba(0,0,0,.25);
+        padding:16px 18px; display:flex; align-items:center; gap:12px;
+        animation: glfade .18s ease;
+      }
+      #global-loader .msg{ font-size:.95rem; font-weight:600; }
+      #global-loader .spinner{
+        width:22px; height:22px; border-radius:50%;
+        border:3px solid #e5e7eb; border-top-color:#2563EB; animation: spin 1s linear infinite;
+      }
+      @keyframes spin{ to{ transform: rotate(360deg); } }
+      @keyframes glfade{ from{ opacity:0; transform: translateY(6px) } to{ opacity:1; transform:none } }
+    `;
+    document.head.appendChild(st);
+  }
+
+  host = document.createElement("div");
+  host.id = "global-loader";
+  host.setAttribute("role", "status");
+  host.setAttribute("aria-live", "polite");
+  host.innerHTML = `
+    <div class="panel">
+      <div class="spinner" aria-hidden="true"></div>
+      <div class="msg" id="global-loader-msg">Cargando…</div>
+    </div>`;
+  document.body.appendChild(host);
+  return host;
+}
+
+function showLoader(message = "Cargando…") {
+  const host = ensureLoaderHost();
+  const msg = host.querySelector("#global-loader-msg");
+  if (msg) msg.textContent = message;
+  LOADER_COUNT++;
+  host.classList.add("open");
+}
+
+function hideLoader(force = false) {
+  const host = ensureLoaderHost();
+  LOADER_COUNT = force ? 0 : Math.max(0, LOADER_COUNT - 1);
+  if (LOADER_COUNT === 0) host.classList.remove("open");
+}
+
 function renderAuthGate() {
   // busca el contenedor principal de la vista
   const host =
@@ -66,11 +131,14 @@ document.addEventListener("DOMContentLoaded", init);
 
 async function init() {
   // 1) VALIDAR SESIÓN ANTES DE MONTAR UI
+  showLoader("Verificando sesión…");
   const me = await getSessionUser().catch(() => null);
   if (!me) {
+    hideLoader();
     renderAuthGate();
     return; // no seguimos montando nada
   }
+  hideLoader();
 
   // 2) Listeners básicos de la vista
   $("#filter-button")?.addEventListener("click", () => {
@@ -82,18 +150,21 @@ async function init() {
   showSkeleton();
 
   // 4) Cargar datos
+  showLoader("Cargando platillos…");
   try {
     const [dishes, cats] = await Promise.all([getPlatillos(0), getCategorias(0)]);
     PLATILLOS  = dishes;
     CATEGORIAS = cats.map(c => ({ ...c, slug: slugify(c.nombre) }));
     CAT_BY_ID  = new Map(CATEGORIAS.map(c => [c.id, c]));
   } catch (err) {
+    hideLoader();
     if (isAuthError(err)) { renderAuthGate(); return; }
-    // Si es otro error, muestra “sin platillos” pero no rompas la vista
+    // Si es otro error, muestra "sin platillos" pero no rompas la vista
     console.error("Error cargando menú:", err);
     $("#dishes-container").innerHTML = `<div class="col-span-2 text-center text-gray-500 py-6">No fue posible cargar el menú.</div>`;
     return;
   }
+  hideLoader();
 
   // 5) Render UI
   buildCategoryButtons();

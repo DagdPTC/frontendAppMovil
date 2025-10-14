@@ -1,5 +1,6 @@
-/* RESERVACONTROLLER.JS - MEJORADO
+/* RESERVACONTROLLER.JS - CON LOADER GLOBAL
    Cambios:
+   - Loader global con mensajes personalizados
    - Solo 1 tarjeta expandida a la vez
    - Muestra mesa seleccionada en tarjeta
    - Modal permite seleccionar solo 1 mesa (radio buttons)
@@ -9,6 +10,71 @@ import {
   getReserva, createReserva, updateReserva, deleteReserva,
   getTiposReserva, getMesas, getTiposMesa
 } from "../services/reservaService.js";
+
+/* =========================
+   LOADER GLOBAL (overlay con mensajes)
+   ========================= */
+let LOADER_COUNT = 0;
+
+function ensureLoaderHost() {
+  let host = document.getElementById("global-loader");
+  if (host) return host;
+
+  // estilos del loader (una sola vez)
+  if (!document.getElementById("global-loader-styles")) {
+    const st = document.createElement("style");
+    st.id = "global-loader-styles";
+    st.textContent = `
+      #global-loader{
+        position: fixed; inset: 0; z-index: 99999; display: none;
+        align-items: center; justify-content: center;
+        background: rgba(0,0,0,.35); backdrop-filter: blur(1.5px);
+      }
+      #global-loader.open{ display:flex; }
+      #global-loader .panel{
+        min-width: 260px; max-width: 90vw;
+        background:#fff; color:#111; border-radius:14px; border:1px solid #e5e7eb;
+        box-shadow: 0 24px 64px rgba(0,0,0,.25);
+        padding:16px 18px; display:flex; align-items:center; gap:12px;
+        animation: glfade .18s ease;
+      }
+      #global-loader .msg{ font-size:.95rem; font-weight:600; }
+      #global-loader .spinner{
+        width:22px; height:22px; border-radius:50%;
+        border:3px solid #e5e7eb; border-top-color:#2563EB; animation: spin 1s linear infinite;
+      }
+      @keyframes spin{ to{ transform: rotate(360deg); } }
+      @keyframes glfade{ from{ opacity:0; transform: translateY(6px) } to{ opacity:1; transform:none } }
+    `;
+    document.head.appendChild(st);
+  }
+
+  host = document.createElement("div");
+  host.id = "global-loader";
+  host.setAttribute("role", "status");
+  host.setAttribute("aria-live", "polite");
+  host.innerHTML = `
+    <div class="panel">
+      <div class="spinner" aria-hidden="true"></div>
+      <div class="msg" id="global-loader-msg">Cargando…</div>
+    </div>`;
+  document.body.appendChild(host);
+  return host;
+}
+
+function showLoader(message = "Cargando…") {
+  const host = ensureLoaderHost();
+  const msg = host.querySelector("#global-loader-msg");
+  if (msg) msg.textContent = message;
+  LOADER_COUNT++;
+  host.classList.add("open");
+}
+
+function hideLoader(force = false) {
+  const host = ensureLoaderHost();
+  LOADER_COUNT = force ? 0 : Math.max(0, LOADER_COUNT - 1);
+  if (LOADER_COUNT === 0) host.classList.remove("open");
+}
 
 // ==========================
 // AUTH GATE para Reservas
@@ -48,10 +114,20 @@ function handle401(e) {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  showLoader("Verificando sesión…");
   try {
     const me = await getSessionUser();
-    if (!me) { renderAuthGate(); return; }
-  } catch { renderAuthGate(); return; }
+    if (!me) { 
+      hideLoader();
+      renderAuthGate(); 
+      return; 
+    }
+  } catch { 
+    hideLoader();
+    renderAuthGate(); 
+    return; 
+  }
+  hideLoader();
 
   newReservationBtn?.addEventListener("click", () => {
     clearForm();
@@ -72,8 +148,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
 
   setupRealtimeValidation();
+  
+  showLoader("Cargando catálogos…");
   await loadTiposMesa();
   await loadTiposEvento();
+  hideLoader();
+  
   await loadFromAPI();
 });
 
@@ -490,9 +570,12 @@ function renderReservations(list){
     card.querySelector(".js-del").addEventListener("click", async ()=>{
       if(!confirm("¿Estás seguro de eliminar esta reserva? Esta acción no se puede deshacer.")) return;
       try {
+        showLoader("Eliminando reserva…");
         await deleteReserva(r.id);
         await loadFromAPI();
+        hideLoader();
       } catch(err) {
+        hideLoader();
         alert(`Error al eliminar: ${err.message}`);
       }
     });
@@ -505,6 +588,7 @@ function renderReservations(list){
 let mesasCache = []; // CAMBIO: Cache global de mesas
 
 async function loadFromAPI(){
+  showLoader("Cargando reservas…");
   try {
     const apiList = await getReserva();
     const uiList  = (Array.isArray(apiList)?apiList:[]).map(apiToUI);
@@ -516,6 +600,8 @@ async function loadFromAPI(){
       <i class="fas fa-exclamation-triangle mr-2"></i>
       No se pudieron cargar las reservas: ${esc(e.message)}
     </div>`;
+  } finally {
+    hideLoader();
   }
 }
 
@@ -817,15 +903,20 @@ async function handleSave(){
   saveReservationBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Guardando...';
 
   try{
+    showLoader(editingId != null ? "Actualizando reserva…" : "Guardando reserva…");
+    
     if(editingId!=null) {
       await updateReserva(editingId,payload);
     } else {
       await createReserva(payload);
     }
+    
+    hideLoader();
     await loadFromAPI();
     clearForm();
     closeForm();
   }catch(err){
+    hideLoader();
     console.error("[Guardar] Error:",err);
     alert(`❌ Error al guardar la reserva:\n\n${err.message}`);
   } finally {
@@ -974,7 +1065,9 @@ async function openTablesModal() {
 
   modal.classList.remove("hidden");
 
+  showLoader("Cargando mesas…");
   const loaded = await loadMesasFromAPI();
+  hideLoader();
 
   if (!loaded || mesasCache.length === 0) {
     tablesGrid.innerHTML = `
@@ -1039,10 +1132,12 @@ async function openTablesModal() {
     refreshBtn.disabled = true;
     refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
+    showLoader("Actualizando disponibilidad…");
     await loadFromAPI();
     await loadMesasFromAPI();
     renderMesasGrid(tablesGrid, tempSelected, fecha, horaInicio, horaFin);
     updateMesasInfo();
+    hideLoader();
 
     refreshBtn.disabled = false;
     refreshBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
@@ -1244,7 +1339,7 @@ function setupRealtimeValidation() {
       twoDaysFromNow.setDate(today.getDate() + 2);
 
       if (selectedDate < twoDaysFromNow) {
-        const daysUntilSelected = Math.ceil((selectedDate - today) / (1000 * 60 * 60 * 24));
+        constdaysUntilSelected = Math.ceil((selectedDate - today) / (1000 * 60 * 60 * 24));
         showError(dateError, `Las reservas deben hacerse con al menos 2 días de anticipación. Fecha seleccionada: ${daysUntilSelected} día(s) de anticipación.`);
         markFieldInvalid(dateInput);
       } else {
@@ -1495,4 +1590,4 @@ function setupRealtimeValidation() {
   });
 }
 
-console.log("[reservaController] ✓ Módulo cargado - Selección única de mesa + colapso individual de tarjetas");
+console.log("[reservaController] ✓ Módulo cargado - Con loader global + Selección única de mesa + colapso individual de tarjetas");
