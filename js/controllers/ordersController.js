@@ -2889,16 +2889,30 @@ function forceUnlockScroll() {
   document.documentElement.style.overflowY = "auto";
   document.body.style.overflowY = "auto";
 
-  // Cierra overlays si por alguna razón quedaron abiertos
+  // Cierra loader si quedó abierto
   const gl = document.getElementById("global-loader");
   if (gl) { LOADER_COUNT = 0; gl.classList.remove("open"); }
 
-  document.getElementById("order-overlay")?.classList.remove("open");
+  // 🔧 Importante: NO quitar a ciegas la clase .open del overlay.
+  // En su lugar, si el formulario quedó dentro del overlay Y el overlay está cerrado,
+  // devolvemos el formulario a su lugar original.
+  const overlay = document.getElementById("order-overlay");
+  const form = document.getElementById("new-order-form");
+
+  // Si el overlay está cerrado pero el form sigue dentro del sheet, regrésalo:
+  if (overlay && !overlay.classList.contains("open") && form && form.parentElement?.id === "order-sheet") {
+    closeOrderFormOverlay(); // <-- esto reubica el form a su _homeParent
+  }
+
+  // Si quieres evitar cerrar el overlay al volver de otra pestaña, elimina estas líneas:
+  // document.getElementById("order-overlay")?.classList.remove("open");
+
+  // Filtros y selects “portal” sí podemos cerrarlos sin problema
   document.getElementById("f-overlay")?.classList.remove("open");
   document.getElementById("f-panel")?.classList.remove("open");
-  document.querySelectorAll(".fs-portal-panel.open")
-    .forEach(p => p.classList.remove("open"));
+  document.querySelectorAll(".fs-portal-panel.open").forEach(p => p.classList.remove("open"));
 }
+
 
 // Llamadas seguras
 window.addEventListener("pageshow", forceUnlockScroll);
