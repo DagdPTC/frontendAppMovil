@@ -12,10 +12,81 @@ import {
 } from "../services/ordersService.js";
 import { getPlatillos } from "../services/menuService.js";
 
-const K_MESA_SNAP = "mesaSnapshotPending";  
+const K_MESA_SNAP = "mesaSnapshotPending";
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+const PAGE_LIMIT = 50;
+
+// Helpers
+const clampSize = (n) => Math.min(Math.max(Number(n) || 0, 1), PAGE_LIMIT);
+
+// Descarga todas las páginas de un endpoint paginado Spring Data
+async function fetchPaged(baseUrl, size = PAGE_LIMIT) {
+  const out = [];
+  let page = 0;
+  let totalPages = 1;
+
+  while (page < totalPages) {
+    const url = `${baseUrl}?page=${page}&size=${clampSize(size)}`;
+    const r = await fetch(url, { credentials: "include" });
+    if (!r.ok) {
+      // Si falla (ej. 400 por size), corto y devuelvo lo acumulado
+      console.warn("fetchPaged fallo:", url, r.status);
+      break;
+    }
+    const data = await r.json().catch(() => ({}));
+    const content = Array.isArray(data?.content) ? data.content : [];
+    out.push(...content);
+
+    totalPages = Number.isFinite(data?.totalPages) ? data.totalPages : 1;
+    page += 1;
+    // Si el backend no manda totalPages, no loops
+    if (!Number.isFinite(data?.totalPages)) break;
+  }
+  return out;
+}
+
+function _norm(s) {
+  return String(s ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+function _cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+function _pedidoEsCerradoPorNombre(nombre = "") {
+  const s = _norm(nombre);
+  return s.includes("final") || s.includes("cancel") || s.includes("anul") ||
+    s.includes("rechaz") || s.includes("pag");
+}
+function _pedidoEsReservaPorNombre(nombre = "") {
+  const s = _norm(nombre);
+  return s.includes("reserv");
+}
+
+function _categoriaEstadoMesaPorNombre(nombre = "") {
+  const s = _norm(nombre);
+  if (s.includes("dispon")) return "disponible";
+  if (s.includes("ocup")) return "ocupada";
+  if (s.includes("reserv")) return "reservada";
+  if (s.includes("limp")) return "limpieza";
+  if (s.includes("fuera") || s.includes("uso") || s.includes("manten")) return "fuera";
+  return "desconocido";
+}
+function _labelDeCategoria(cat) {
+  switch (cat) {
+    case "disponible": return "Disponible";
+    case "ocupada": return "Ocupada";
+    case "reservada": return "Reservada";
+    case "limpieza": return "Limpieza";
+    case "fuera": return "Fuera de uso";
+    default: return "Desconocido";
+  }
+}
+
 
 let editingId = null;
 // idPlatillo -> idDetalle de las líneas originales del pedido
@@ -796,8 +867,8 @@ async function tryUpdateMesaEstado(idMesa, idEstadoMesa) {
   const res = await fetch(url, { method: "PATCH", credentials: "include" });
   return res.ok;
 }
-async function ocuparMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 2); } // Ocupada
-async function liberarMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 1); } // Disponible
+async function ocuparMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 2); }
+async function liberarMesa(idMesa) { await tryUpdateMesaEstado(idMesa, 1); }
 
 /* =========================
    ESTADOS (dinámicos desde BD)
@@ -823,9 +894,15 @@ async function cargarEstadosYSelect() {
       opt.textContent = est.nombre;
       selEstado.appendChild(opt);
     });
-    if (ESTADOS_ORDER[0]) selEstado.value = String(ESTADOS_ORDER[0].id);
+
+    // ← buscar explícitamente “pendiente”
+    const findPend = ESTADOS_ORDER.find(e =>
+      e.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes("pend")
+    );
+    selEstado.value = String(findPend?.id ?? ESTADOS_ORDER[0]?.id ?? "");
     upgradeSelect(selEstado, { placeholder: "Estado" });
   }
+
 }
 function nextEstadoId(currentId) {
   if (!ESTADOS_ORDER.length) return undefined;
@@ -941,6 +1018,7 @@ function nombreEstadoMesa(m) {
     if (idEstado === 2) return "ocupada";
     if (idEstado === 3) return "reservada";
     if (idEstado === 4) return "limpieza";
+    if (idEstado === 5) return "fuera";
   }
   const raw = (
     m.nomEstadoMesa ?? m.nomEstado ??
@@ -975,6 +1053,7 @@ function getEstadoMesaNormalized(m) {
     if (idE === 2) return "ocupada";
     if (idE === 3) return "reservada";
     if (idE === 4) return "limpieza";
+    if (idE === 5) return "fuera";
   }
   const raw = (
     m.nomEstadoMesa ?? m.nomEstado ??
@@ -991,168 +1070,150 @@ function getEstadoMesaNormalized(m) {
   return "desconocido";
 }
 
-// Carga mesas con estado real (robusto si pedidos/estados fallan)
 async function cargarMesasSelect(opts = {}) {
   const { allowCurrentId = null } = opts;
   const sel = document.getElementById("table-select");
   if (!sel) return;
 
-  const norm = (s) => String(s ?? "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
   sel.className =
     "w-full max-w-full p-2 md:p-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm md:text-base bg-white shadow-sm";
-  sel.innerHTML = `<option value="" disabled selected>Seleccione una mesa disponible…</option>`;
+  sel.innerHTML = `<option value="" disabled selected>Cargando mesas…</option>`;
 
   const API = "https://orderly-api-b53514e40ebd.herokuapp.com";
-  const urlMesas = `${API}/apiMesa/getDataMesa?page=0&size=50`;
-  const urlEM = `${API}/apiEstadoMesa/getDataEstadoMesa?page=0&size=50`;
-  const urlPed = `${API}/apiPedido/getDataPedido?page=0&size=50`;
-  const urlEP = `${API}/apiEstadoPedido/getDataEstadoPedido?page=0&size=50`;
 
-  const getId = (o) => Number(o.id ?? o.Id ?? o.idEstadoMesa ?? o.IdEstadoMesa);
-  const nomMesa = (m) => String(m.nomMesa ?? `Mesa ${getId(m)}`);
-  const idEstMesa = (m) => Number(m.idEstadoMesa ?? m.IdEstadoMesa);
-  const nomEstadoM = (e) => String(
-    e.EstadoMesa ?? e.estadoMesa ?? e.nombre ?? e.nomEstado ?? e.estado ?? e.NOMBREESTADO ?? ""
-  ).trim();
-  const nomEstadoPed = (e) => String(e.nomEstado ?? e.nombre ?? e.estado ?? "").trim();
-  const Cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s);
-
+  // ↓↓↓ NO redeclarar las mismas variables dentro del try (evita 'shadowing')
   let mesas = [], estadosMesa = [], pedidos = [], estadosPed = [];
 
-  // 👉 NUEVO: leer bloqueos locales (para deshabilitar incluso si el backend aún no refleja el cambio)
-  const lockedSet = getLockedSet();
-
-  // === Mesas ===
   try {
-    const r = await fetch(urlMesas, { credentials: "include" });
-    if (r.ok) {
-      const d = await r.json().catch(() => ({}));
-      mesas = Array.isArray(d?.content) ? d.content : (Array.isArray(d) ? d : []);
-    }
-  } catch (e) { console.error("[Mesas] Error obteniendo mesas:", e); }
+    const results = await Promise.allSettled([
+      fetchPaged(`${API}/apiMesa/getDataMesa`, PAGE_LIMIT),
+      fetchPaged(`${API}/apiEstadoMesa/getDataEstadoMesa`, PAGE_LIMIT),
+      fetchPaged(`${API}/apiPedido/getDataPedido`, PAGE_LIMIT),
+      fetchPaged(`${API}/apiEstadoPedido/getDataEstadoPedido`, PAGE_LIMIT),
+    ]);
 
-  // ===== Pedido -> EstadoMesa (GLOBAL) =====
-  function normEstadoStr(s) {
-    return String(s || "")
-      .trim()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-  }
-  /** true si el pedido está cerrado (libera mesa) */
-  function isPedidoCerradoNombre(nombreEstadoPedido) {
-    const s = normEstadoStr(nombreEstadoPedido);
-    return (
-      s.includes("final") ||
-      s.includes("cancel") ||
-      s.includes("anul") ||
-      s.includes("rechaz") ||
-      s.includes("pag")   // pagado/pagada
+    mesas = results[0].status === "fulfilled" ? results[0].value : [];
+    estadosMesa = results[1].status === "fulfilled" ? results[1].value : [];
+    pedidos = results[2].status === "fulfilled" ? results[2].value : [];
+    estadosPed = results[3].status === "fulfilled" ? results[3].value : [];
+  } catch { /* best-effort */ }
+
+  // ---- Normalizadores robustos (soporta mayúsculas tipo Oracle) ----
+  const getId = (o) =>
+    Number(
+      o?.id ?? o?.Id ?? o?.idMesa ?? o?.IdMesa ??
+      o?.idEstadoMesa ?? o?.IdEstadoMesa ?? o?.IDESTADOMESA ?? o?.IDMESA
     );
-  }
-  /** Mapea estado de pedido a idEstadoMesa: 1=disponible, 2=ocupada, 3=reservada */
-  function mesaEstadoIdForPedidoNombre(nombreEstadoPedido) {
-    const s = normEstadoStr(nombreEstadoPedido);
-    if (isPedidoCerradoNombre(s)) return 1;            // disponible
-    if (s.includes("pend") || s.includes("reserv")) return 3; // reservada
-    if (s.includes("prep") || s.includes("entreg")) return 2; // ocupada
-    return 2; // por defecto, no-cerrado → ocupada
-  }
 
-  // === Catálogo estados de mesa ===
-  try {
-    const r = await fetch(urlEM, { credentials: "include" });
-    if (r.ok) {
-      const d = await r.json().catch(() => ({}));
-      estadosMesa = Array.isArray(d?.content) ? d.content : (Array.isArray(d) ? d : []);
-    }
-  } catch (e) { console.error("[Mesas] Error obteniendo estados de mesa:", e); }
+  const nomMesa = (m) =>
+    String(
+      m?.nomMesa ?? m?.numero ?? m?.numMesa ?? m?.NUMMESA ?? m?.NUMERO ?? getId(m) ?? "?"
+    ).trim();
 
-  // === Catálogo estados de pedido ===
-  try {
-    const r = await fetch(urlEP, { credentials: "include" });
-    if (r.ok) {
-      const d = await r.json().catch(() => ({}));
-      estadosPed = Array.isArray(d?.content) ? d.content : (Array.isArray(d) ? d : []);
-    }
-  } catch (e) { console.error("[Mesas] Error obteniendo estados de pedido:", e); }
+  const idEstMesa = (m) =>
+    Number(
+      m?.idEstadoMesa ?? m?.IdEstadoMesa ?? m?.ESTADO_MESA_ID ?? m?.IDESTADOMESA ??
+      m?.estadoMesa?.id ?? m?.estadoMesa?.Id ?? m?.estado?.id ?? m?.estado?.Id
+    );
 
-  // === Pedidos (si falla, seguimos sin bloquear) ===
-  try {
-    const r = await fetch(urlPed, { credentials: "include" });
-    if (r.ok) {
-      const d = await r.json().catch(() => ({}));
-      pedidos = Array.isArray(d?.content) ? d.content : (Array.isArray(d) ? d : []);
-    } else {
-      console.warn("[Mesas] Pedidos no disponibles (", r.status, ") — continuo sin bloquear por pedidos.");
-      pedidos = [];
-    }
-  } catch (e) {
-    console.warn("[Mesas] Error obteniendo pedidos — continuo sin bloquear:", e?.message || e);
-    pedidos = [];
-  }
+  const nomEstMesa = (e) =>
+    String(
+      e?.nomEstado ?? e?.nombre ?? e?.estado ?? e?.EstadoMesa ?? e?.ESTADOMESA ?? ""
+    ).trim();
 
-  const MAP_ID_ESTADO_MESA_NOMBRE = new Map(estadosMesa.map(e => [getId(e), nomEstadoM(e)]));
-  const MAP_ID_ESTADO_PED_NOMBRE = new Map(estadosPed.map(e => [getId(e), nomEstadoPed(e)]));
+  const nomEstPed = (e) =>
+    String(e?.nomEstado ?? e?.nombre ?? e?.estado ?? "").trim();
 
-  // Encontrar "Disponible" por nombre — robusto
-  let idDisponible = null;
-  for (const e of estadosMesa) {
-    if (norm(nomEstadoM(e)).includes("dispon")) { idDisponible = getId(e); break; }
-  }
-  if (idDisponible == null) {
-    console.warn("[Mesas] No se encontró estado 'Disponible' en el catálogo. Se mostrarán todas como no seleccionables.");
-  }
-
-  const esPedidoCerrado = (nombre) => isPedidoCerradoNombre(nombre);
-  const mesasConPedidoActivo = new Set(
-    (pedidos || [])
-      .filter(p => !esPedidoCerrado(MAP_ID_ESTADO_PED_NOMBRE.get(Number(p.idEstadoPedido ?? p.IdEstadoPedido)) || ""))
-      .map(p => Number(p.idMesa ?? p.IdMesa))
-      .filter(Boolean)
+  // Mapas: idEstadoMesa -> "Disponible/Ocupada/Reservada/Limpieza/Fuera de uso"
+  const MAP_ESTADO_MESA_NOMBRE = new Map(
+    (estadosMesa || []).map((e) => [getId(e), nomEstMesa(e)])
+  );
+  const MAP_ESTADO_PED_NOMBRE = new Map(
+    (estadosPed || []).map((e) => [getId(e), nomEstPed(e)])
   );
 
+  // Mesa -> categoría impuesta por pedido activo (ocupada/reservada)
+  const mesaCatPorPedido = new Map();
+  for (const p of pedidos) {
+    const idMesaP = Number(p?.idMesa ?? p?.IdMesa ?? p?.IDMESA);
+    const idEstPed = Number(p?.idEstadoPedido ?? p?.IdEstadoPedido);
+    if (!idMesaP || !idEstPed) continue;
+
+    const nombrePed = (MAP_ESTADO_PED_NOMBRE.get(idEstPed) || "").toLowerCase();
+    const cerrado =
+      nombrePed.includes("final") || nombrePed.includes("pag") ||
+      nombrePed.includes("cancel") || nombrePed.includes("anul") ||
+      nombrePed.includes("rechaz");
+
+    if (cerrado) continue; // pedido cerrado no marca ocupación
+
+    const esReserva = nombrePed.includes("reserv");
+    mesaCatPorPedido.set(idMesaP, esReserva ? "reservada" : "ocupada");
+  }
+
+  // Limpia y rellena el select
+  sel.innerHTML = `<option value="" disabled selected>Seleccione una mesa…</option>`;
   mesas.sort((a, b) => getId(a) - getId(b));
 
-  sel.innerHTML = `<option value="" disabled selected>Seleccione una mesa disponible…</option>`;
   for (const m of mesas) {
     const id = getId(m);
     const nombre = nomMesa(m);
-    const idEst = idEstMesa(m);
-    const nomEst = MAP_ID_ESTADO_MESA_NOMBRE.get(idEst) || "Desconocido";
 
-    // si hay pedido activo sobre esa mesa, fuerza "Ocupada"
-    const estadoEfectivo = mesasConPedidoActivo.has(id) ? "Ocupada" : nomEst;
+    // 1) Leer el estado de la mesa desde varias formas (id y/o nombre anidado)
+    const estadoIdMesa =
+      Number(
+        m?.idEstadoMesa ?? m?.IdEstadoMesa ?? m?.IDESTADOMESA ??
+        m?.estadoMesa?.id ?? m?.estadoMesa?.Id ??
+        m?.estado?.id ?? m?.estado?.Id
+      ) || null;
 
-    // 👉 NUEVO: considerar bloqueo local (además de lo que diga el backend y pedidos)
-    const lockedLocal = lockedSet.has(String(id));
+    const nombreEstadoPlano =
+      MAP_ESTADO_MESA_NOMBRE.get(estadoIdMesa) || // si tenemos catálogo por id
+      String(
+        m?.nomEstadoMesa ?? m?.nomEstado ??
+        m?.estadoMesa?.nomEstado ?? m?.estadoMesa?.nombre ?? m?.estadoMesa?.estado ??
+        m?.estado?.nomEstado ?? m?.estado?.nombre ?? m?.estado?.estado ?? ""
+      );
 
-    let habilitada =
-      (idDisponible != null) &&
-      (idEst === idDisponible) &&
-      !mesasConPedidoActivo.has(id) &&
-      !lockedLocal; // 👈 agrega el bloqueo local
-
-    let etiqueta = `${nombre} — ${Cap(estadoEfectivo)}`;
-
-    if (allowCurrentId && Number(allowCurrentId) === id && !habilitada) {
-      // al editar, permitir la mesa original aunque esté bloqueada
-      habilitada = true;
-      etiqueta = `${etiqueta} (actual)`;
+    // 2) Normalizar a categorías conocidas
+    let catBD = null;
+    if (estadoIdMesa === 1) catBD = "disponible";
+    else if (estadoIdMesa === 2) catBD = "ocupada";
+    else if (estadoIdMesa === 3) catBD = "reservada";
+    else if (estadoIdMesa === 4) catBD = "limpieza";
+    else if (estadoIdMesa === 5) catBD = "fuera";
+    // Última red: usa tu helper global por si cambia el shape
+    if (catBD === "desconocido") {
+      const norm = getEstadoMesaNormalized(m);
+      if (norm) catBD = norm;
     }
 
-    const opt = new Option(etiqueta, String(id), false, false);
-    opt.dataset.estado = norm(estadoEfectivo);
-    opt.disabled = !habilitada;
-    if (!habilitada) opt.title = `No seleccionable: ${Cap(estadoEfectivo)}${lockedLocal ? " (bloqueada)" : ""}`;
+    // 3) Si hay pedido activo, imponemos ocupada/reservada
+    const cat = mesaCatPorPedido.get(id) ?? catBD;
+
+    // 4) Etiqueta visible y reglas de deshabilitado
+    const labelCat = ({
+      disponible: "Disponible",
+      ocupada: "Ocupada",
+      reservada: "Reservada",
+      limpieza: "Limpieza",
+      fuera: "Fuera de uso",
+      desconocido: "Desconocido",
+    })[cat];
+
+    const opt = new Option(`${nombre} — ${labelCat}`, String(id), false, false);
+
+    // Deshabilitar en select: Ocupada, Limpieza y Fuera de uso
+    let disabled = cat === "ocupada" || cat === "limpieza" || cat === "fuera";
+    // Pero permite seleccionar la mesa actual si estás editando
+    if (allowCurrentId && Number(allowCurrentId) === id) disabled = false;
+
+    opt.disabled = disabled;
+    if (disabled) opt.title = `No seleccionable: ${labelCat}`;
     sel.appendChild(opt);
   }
 
+  // Evita que el usuario pueda dejar una opción deshabilitada seleccionada
   sel.addEventListener("change", () => {
     const o = sel.options[sel.selectedIndex];
     if (o && o.disabled) sel.selectedIndex = 0;
@@ -1160,6 +1221,7 @@ async function cargarMesasSelect(opts = {}) {
 
   upgradeSelect?.(sel, { placeholder: "Mesa" });
 }
+
 
 
 
@@ -1972,8 +2034,8 @@ function agregarTarjetaPedido(pedido, container) {
 
       const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
       if (idMesa) {
-        await liberarMesa(idMesa);
-        try { unlockMesaLocal(idMesa); } catch {}
+        await liberarMesa(idMesa);     // PATCH /apiMesa/estado/{id}/1
+        try { unlockMesaLocal(idMesa); } catch { }
       }
 
       showAlert("success", "Pedido eliminado correctamente");
@@ -2026,23 +2088,21 @@ function agregarTarjetaPedido(pedido, container) {
       // === Sincroniza el estado de la mesa en BD
       try {
         if (!MAP_ESTADOS.size) await cargarEstadosYSelect();
+        // Dentro del selEstado.addEventListener("change", async () => { ... })
         const nombreNuevo = MAP_ESTADOS.get(newId)?.nombre || "";
         const idMesa = Number(pedido.idMesa || pedido.Mesa || 0);
         if (idMesa) {
-          const idEstadoMesaNuevo = (typeof mesaEstadoIdForPedidoNombre === "function")
-            ? mesaEstadoIdForPedidoNombre(nombreNuevo)
-            : computeLocalMesaEstadoId(nombreNuevo);
+          const s = nombreNuevo.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          const cerrado = s.includes("final") || s.includes("cancel") || s.includes("anul") ||
+            s.includes("rechaz") || s.includes("pag");
+          const idEstadoMesaNuevo = cerrado ? 1 : (s.includes("reserv") ? 3 : 2);
 
           await tryUpdateMesaEstado(idMesa, idEstadoMesaNuevo);
 
-          // Bloqueo local coherente con el estado del pedido
-          const s = String(nombreNuevo).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-          const cerrado = s.includes("final") || s.includes("cancel") || s.includes("anul") || s.includes("rechaz") || s.includes("pag");
-          try {
-            if (cerrado) unlockMesaLocal(idMesa);
-            else lockMesaLocal(idMesa);
-          } catch {}
+          // Lock local coherente
+          try { if (cerrado) unlockMesaLocal(idMesa); else lockMesaLocal(idMesa); } catch { }
         }
+
       } catch { /* best-effort */ }
 
       showLoader("Cargando la tabla…");
@@ -2399,48 +2459,35 @@ function buildPayloadsFromSelection() {
 
 
 async function crearPedidoDesdeSeleccion() {
-  // 1) Armar payload y crear el pedido
+  // 1) Armar payload a partir del form/selección
   const body = buildPayloadsFromSelection();
-  await createPedido(body);
-
-  // 2) Bloquear/ajustar estado de la mesa según el estado del pedido
   const idMesa = Number(body.idMesa || 0);
   const idEstadoPedido = Number(body.idEstadoPedido || 0);
 
-  if (idMesa && Number.isFinite(idEstadoPedido)) {
-    // Tomamos el nombre del estado del pedido (por ejemplo: "pendiente")
+  // 2) Lock local inmediato (evita doble asignación en UI)
+  if (idMesa) { try { lockMesaLocal(idMesa); } catch { } }
+
+  try {
+    // 3) Crear en backend
+    await createPedido(body);
+
+    // 4) Mapear estado del pedido → estado mesa (IDs de tu catálogo: 1=Disp, 2=Ocup, 3=Res)
     const nombreEstado = (MAP_ESTADOS.get(idEstadoPedido)?.nombre || "").toString();
+    const s = nombreEstado.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const esCerrado = s.includes("final") || s.includes("cancel") || s.includes("anul") ||
+      s.includes("rechaz") || s.includes("pag");
+    const idEstadoMesa = esCerrado ? 1 : (s.includes("reserv") ? 3 : 2);
 
-    // Normalizamos para comparar
-    const s = nombreEstado
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
+    // 5) PATCH real a /apiMesa/estado/{id}/{estadoId}
+    if (idMesa) await tryUpdateMesaEstado(idMesa, idEstadoMesa);
 
-    // Cerrados => mesa disponible (1)
-    const esCerrado =
-      s.includes("final") ||
-      s.includes("cancel") ||
-      s.includes("anul") ||
-      s.includes("rechaz") ||
-      s.includes("pag");
-
-    // Regla: pendiente => ocupada (2), reservada => 3, cerrados => 1, resto => 2
-    const idEstadoMesa =
-      esCerrado ? 1 :
-        s.includes("reserv") ? 3 :
-          2; // pendiente / preparando / entregando => ocupada
-
-    try {
-      await tryUpdateMesaEstado(idMesa, idEstadoMesa);
-      // opcional: también guardamos lock local para otras pantallas
-      try { lockMesaLocal?.(idMesa); } catch { }
-    } catch {
-      // si falla el PATCH, no rompemos el guardado del pedido
-      console.warn("[crearPedidoDesdeSeleccion] No se pudo actualizar el estado de la mesa.");
-    }
+  } catch (e) {
+    // Si falló el create, quita el lock local
+    if (idMesa) { try { unlockMesaLocal(idMesa); } catch { } }
+    throw e;
   }
 }
+
 
 
 
@@ -2464,7 +2511,7 @@ async function actualizarPedido(editId) {
   if (mesaAntes && nuevaMesaId && mesaAntes !== nuevaMesaId) {
     try { await liberarMesa(mesaAntes); } catch { }
     // 👉 NUEVO: liberar bloqueo local de la mesa anterior
-    try { unlockMesaLocal(mesaAntes); } catch {}
+    try { unlockMesaLocal(mesaAntes); } catch { }
   }
 
   // Aplica el estado correcto a la mesa nueva
@@ -2474,7 +2521,7 @@ async function actualizarPedido(editId) {
     try {
       if (cerrado) unlockMesaLocal(nuevaMesaId);
       else lockMesaLocal(nuevaMesaId);
-    } catch {}
+    } catch { }
   }
 
   // Limpieza de estado de edición
